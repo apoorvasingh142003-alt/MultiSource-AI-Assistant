@@ -94,6 +94,69 @@ export async function ask(
   return res.json();
 }
 
+/* ---- streaming ask (SSE, Section 12.3) ---- */
+export async function askStream(
+  question: string,
+  scope: AskScope,
+  role: string | null | undefined,
+  outputMode: string,
+  opts: {
+    custom_system_prompt?: string | null;
+    agent_role?: string | null;
+    output_format?: string;
+    multi_agent?: boolean;
+    session_id?: string | null;
+  },
+  handlers: {
+    onDelta?: (text: string) => void;
+    onRoute?: (route: string | null) => void;
+    onDone: (resp: AskResponse) => void;
+    onError?: (msg: string) => void;
+  },
+): Promise<void> {
+  const res = await fetch(`${apiBase()}/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question, scope, output_mode: outputMode,
+      ...(role ? { role } : {}),
+      ...(opts.custom_system_prompt ? { custom_system_prompt: opts.custom_system_prompt } : {}),
+      ...(opts.agent_role ? { agent_role: opts.agent_role } : {}),
+      ...(opts.output_format && opts.output_format !== "auto" ? { output_format: opts.output_format } : {}),
+      ...(opts.multi_agent ? { multi_agent: true } : {}),
+      ...(opts.session_id ? { session_id: opts.session_id } : {}),
+    }),
+  });
+  if (!res.ok || !res.body) throw new Error(`ask/stream → ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  // Parse SSE frames separated by a blank line.
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let event = "message";
+      let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      const payload = JSON.parse(data);
+      if (event === "delta") handlers.onDelta?.(payload.text ?? "");
+      else if (event === "route") handlers.onRoute?.(payload.route ?? null);
+      else if (event === "done") handlers.onDone(payload as AskResponse);
+      else if (event === "error") handlers.onError?.(payload.message ?? "stream error");
+    }
+  }
+}
+
 /* ---- ingestion ---- */
 async function postFiles(path: string, files: File[]): Promise<IngestResult> {
   const form = new FormData();

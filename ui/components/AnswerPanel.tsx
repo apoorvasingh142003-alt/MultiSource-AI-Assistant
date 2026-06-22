@@ -31,6 +31,13 @@ export default function AnswerPanel({
   const [copied, setCopied] = React.useState(false);
   const isGK = t.route?.route === "GENERAL_KNOWLEDGE";
 
+  // Ctrl+E (dispatched from the page) toggles the explainability panel.
+  React.useEffect(() => {
+    const toggle = () => setShowExplain((v) => !v);
+    window.addEventListener("aba:toggle-explain", toggle);
+    return () => window.removeEventListener("aba:toggle-explain", toggle);
+  }, []);
+
   // Parse answer segments for table detection
   const segments = segmentAnswer(resp.answer);
   const hasTables = segments.some((s) => s.type === "table");

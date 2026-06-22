@@ -243,19 +243,21 @@ function DbRow({ d }: { d: Inventory["databases"][number] }) {
 
 /* ================= main ================= */
 export default function Workspace({
-  inventory, question, setQuestion, role, setRole, outputMode, setOutputMode, onAsk, onClear, resp, loading, error,
+  inventory, question, setQuestion, role, setRole, outputMode, setOutputMode, aiSettings, onAiSettingsUpdate, onAsk, onClear, resp, loading, error,
   onOpenInspector, onUploadPdf, onUploadSqlite, onReset,
-  pdfBusy, sqliteBusy, resetting, pdfMsg, pdfErr, dbMsg, dbErr,
+  pdfBusy, sqliteBusy, resetting, pdfMsg, pdfErr, dbMsg, dbErr, examples = [], streamingText = "",
 }: {
   inventory: Inventory | null;
+  examples?: { label: string; question: string }[];
+  streamingText?: string;
   question: string;
   setQuestion: (q: string) => void;
   role: string | null;
   setRole: (r: string | null) => void;
   outputMode: string;
   setOutputMode: (mode: string) => void;
-  aiSettings: { agentRole: string; customSystemPrompt: string; outputFormat: string };
-  onAiSettingsUpdate: (patch: Partial<{ agentRole: string; customSystemPrompt: string; outputFormat: string }>) => void;
+  aiSettings: { agentRole: string; customSystemPrompt: string; outputFormat: string; multiAgent: boolean };
+  onAiSettingsUpdate: (patch: Partial<{ agentRole: string; customSystemPrompt: string; outputFormat: string; multiAgent: boolean }>) => void;
   onAsk: (q: string) => void;
   onClear: () => void;
   resp: AskResponse | null;
@@ -386,10 +388,23 @@ export default function Workspace({
           </Card>
         )}
 
-        {loading && (
+        {loading && !streamingText && (
           <Card className="p-10 text-center">
             <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-indigo-500" />
             <span className="text-[13px] text-slate-500">Routing → retrieving → grounding…</span>
+          </Card>
+        )}
+
+        {loading && streamingText && (
+          <Card className="p-5">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-indigo-500">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />Streaming answer
+            </div>
+            <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700"
+              dir={isRTL(streamingText) ? "rtl" : "ltr"}>
+              {streamingText}
+              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-indigo-400 align-middle" />
+            </p>
           </Card>
         )}
 
@@ -397,11 +412,25 @@ export default function Workspace({
 
         {!resp && !loading && !error && (
           <Card>
-            <EmptyState icon={<Icons.spark className="h-6 w-6" />} title="Ask anything about your sources">
-              Upload your own PDFs and SQLite databases on the left, then ask a question. Each answer is
-              grounded in your sources with verifiable citations — open the retrieval trace any time to see
-              exactly how it was produced.
+            <EmptyState icon={<Icons.spark className="h-6 w-6" />} title="Ask anything">
+              Upload your own PDFs and SQLite databases on the left, then ask a question — answers are
+              grounded in your sources with verifiable citations. General-knowledge questions are answered
+              from the model and clearly labelled.
             </EmptyState>
+            {examples.length > 0 && (
+              <div className="mt-1 flex flex-wrap justify-center gap-2 px-4 pb-5">
+                {examples.slice(0, 6).map((ex) => (
+                  <button
+                    key={ex.question}
+                    onClick={() => { setQuestion(ex.question); onAsk(ex.question); }}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600"
+                    title={ex.question}
+                  >
+                    {ex.label || ex.question.slice(0, 40)}
+                  </button>
+                ))}
+              </div>
+            )}
           </Card>
         )}
       </main>

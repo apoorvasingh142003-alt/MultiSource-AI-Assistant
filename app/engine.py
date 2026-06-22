@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import get_settings
+from app.multi_agent import is_multipart
 from app.ingestion.pdf import ingest_pdf, ingest_pdf_dir
 from app.ingestion.sqlite_introspect import SchemaInfo, introspect
 from app.ingestion.sqlite_register import copy_seed, merge_sqlite
@@ -233,21 +234,31 @@ class Engine:
         agent_role: Optional[str] = None,
         output_format: Optional[str] = "auto",
         session_id: Optional[str] = None,
+        multi_agent: bool = False,
     ):
         with self._lock:
             allowed_docs, allowed_tables = self._scope_sources(scope)
             if scope == "workspace" and not allowed_docs and not allowed_tables:
                 return self._empty_workspace_response(question)
-            resp = self.orchestrator.ask(
-                question,
-                allowed_docs=allowed_docs,
-                allowed_tables=allowed_tables,
-                role=role,
-                output_mode=output_mode,
-                custom_system_prompt=custom_system_prompt,
-                agent_role=agent_role,
-                output_format=output_format,
-            )
+            # Multi-agent decomposition (Section 10): triggered explicitly or by a
+            # multi-part heuristic. Runs the full pipeline per sub-question, then synthesizes.
+            if multi_agent or is_multipart(question):
+                from app.multi_agent import run_multi_agent
+                resp = run_multi_agent(
+                    self.orchestrator, question, allowed_docs, allowed_tables,
+                    role, output_mode, custom_system_prompt, agent_role, output_format,
+                )
+            else:
+                resp = self.orchestrator.ask(
+                    question,
+                    allowed_docs=allowed_docs,
+                    allowed_tables=allowed_tables,
+                    role=role,
+                    output_mode=output_mode,
+                    custom_system_prompt=custom_system_prompt,
+                    agent_role=agent_role,
+                    output_format=output_format,
+                )
             self._stamp_origin(resp.trace.evidence)
             return resp
 

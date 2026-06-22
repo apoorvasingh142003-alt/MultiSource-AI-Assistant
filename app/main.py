@@ -58,6 +58,10 @@ def _warm() -> None:
     from app.db.migrations import init_db
     init_db()
 
+    # Start the workflow scheduler (Section 11) — runs scheduled cron workflows.
+    from app.workflow import start_scheduler
+    start_scheduler()
+
     eng = get_engine()
     log.info(
         "Engine ready: %d documents, %d chunks, tables=%s, embeddings=%s",

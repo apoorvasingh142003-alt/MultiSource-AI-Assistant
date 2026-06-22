@@ -30,21 +30,23 @@ interface AiSettingsState {
   agentRole: string;
   customSystemPrompt: string;
   outputFormat: string;
+  multiAgent: boolean;
 }
 
 const STORAGE_KEY = "ai-settings";
+const DEFAULTS: AiSettingsState = {
+  agentRole: "", customSystemPrompt: "", outputFormat: "auto", multiAgent: false,
+};
 
 function loadSettings(): AiSettingsState {
-  if (typeof window === "undefined") {
-    return { agentRole: "", customSystemPrompt: "", outputFormat: "auto" };
-  }
+  if (typeof window === "undefined") return { ...DEFAULTS };
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) return { ...DEFAULTS, ...JSON.parse(saved) };
   } catch {
     /* ignore */
   }
-  return { agentRole: "", customSystemPrompt: "", outputFormat: "auto" };
+  return { ...DEFAULTS };
 }
 
 function saveSettings(s: AiSettingsState) {
@@ -189,6 +191,22 @@ export default function AiSettingsPanel({
             </div>
           </div>
 
+          {/* Multi-agent reasoning (Section 10) */}
+          <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+            <span className="text-[12px] font-medium text-slate-600">
+              Multi-agent reasoning
+              <span className="block text-[10.5px] font-normal text-slate-400">
+                Decompose complex questions, answer in parallel, then synthesize
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.multiAgent}
+              onChange={(e) => onUpdate({ multiAgent: e.target.checked })}
+              className="h-4 w-4 accent-indigo-600"
+            />
+          </label>
+
           {/* Reset */}
           {hasCustom && (
             <button
@@ -197,6 +215,7 @@ export default function AiSettingsPanel({
                   agentRole: "",
                   customSystemPrompt: "",
                   outputFormat: "auto",
+                  multiAgent: false,
                 })
               }
               className="text-[11px] font-medium text-slate-400 transition hover:text-rose-500"

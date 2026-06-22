@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import {
-  ask, fetchConfig, fetchExamples, fetchInventory, fetchSources,
+  ask, askStream, fetchConfig, fetchExamples, fetchInventory, fetchSources,
   fetchSessions, createSession, deleteSession, renameSession, fetchMessages,
   ingestPdf, ingestSqlite, resetWorkspace, type AskScope,
 } from "@/lib/api";
@@ -10,12 +10,13 @@ import type {
 } from "@/lib/types";
 import { Icons, Tabs, cn } from "@/components/ui";
 import Workspace from "@/components/Workspace";
+import WorkspaceView from "@/components/WorkspaceView";
 import Inspector from "@/components/Inspector";
 import Demo from "@/components/Demo";
 import ChatSidebar from "@/components/ChatSidebar";
 import { useAiSettings } from "@/components/AiSettingsPanel";
 
-type TabId = "workspace" | "inspector" | "demo";
+type TabId = "workspace" | "studio" | "inspector" | "demo";
 
 export default function Page() {
   const [config, setConfig] = React.useState<AppConfig | null>(null);
@@ -29,6 +30,7 @@ export default function Page() {
   const [outputMode, setOutputMode] = React.useState("Standard Response");
   const [resp, setResp] = React.useState<AskResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [streamingText, setStreamingText] = React.useState("");   // live SSE partial answer
   const [error, setError] = React.useState<string | null>(null);
   const [connecting, setConnecting] = React.useState(true);
 
@@ -39,6 +41,21 @@ export default function Page() {
   const [sessions, setSessions] = React.useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+
+  // Dark mode (Section 12) — manual toggle over prefers-color-scheme, persisted.
+  const [dark, setDark] = React.useState(false);
+  React.useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
+    const prefers = typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    setDark(saved ? saved === "dark" : !!prefers);
+  }, []);
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.classList.toggle("dark", dark);
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch { /* ignore */ }
+  }, [dark]);
 
   // upload state
   const [pdfBusy, setPdfBusy] = React.useState(false);
@@ -85,6 +102,11 @@ export default function Page() {
         e.preventDefault();
         handleNewSession();
       }
+      // Ctrl+E: toggle the explainability panel on the current answer
+      if ((e.metaKey || e.ctrlKey) && e.key === "e") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("aba:toggle-explain"));
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -98,18 +120,41 @@ export default function Page() {
     setLoading(true);
     setError(null);
     setResp(null);
+    setStreamingText("");
+    const opts = {
+      custom_system_prompt: aiSettings.customSystemPrompt || null,
+      agent_role: aiSettings.agentRole || null,
+      output_format: aiSettings.outputFormat,
+      session_id: activeSessionId,
+      multi_agent: aiSettings.multiAgent,
+    };
+
+    // Preferred path: stream the answer over SSE (Section 12.3).
+    try {
+      let acc = "";
+      await askStream(query, scope, role, outputMode, opts, {
+        onDelta: (t) => { acc += t; setStreamingText(acc); },
+        onDone: (r) => {
+          setResp(r);
+          setStreamingText("");
+          setLoading(false);
+          fetchSessions().then(setSessions).catch(() => {});
+        },
+        onError: () => { throw new Error("stream error"); },
+      });
+      if (loading) setLoading(false);
+      return;
+    } catch {
+      // fall through to the non-streaming path
+      setStreamingText("");
+    }
+
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        const r = await ask(query, scope, role, outputMode, {
-          custom_system_prompt: aiSettings.customSystemPrompt || null,
-          agent_role: aiSettings.agentRole || null,
-          output_format: aiSettings.outputFormat,
-          session_id: activeSessionId,
-        });
+        const r = await ask(query, scope, role, outputMode, opts);
         setResp(r);
         setError(null);
         setLoading(false);
-        // Refresh sessions to show updated message count
         fetchSessions().then(setSessions).catch(() => {});
         return;
       } catch {
@@ -233,6 +278,7 @@ export default function Page() {
 
   const tabs: { id: TabId; label: string; icon?: React.ReactNode }[] = [
     { id: "workspace", label: "Workspace", icon: <Icons.grid className="h-3.5 w-3.5" /> },
+    { id: "studio", label: "Studio", icon: <Icons.layers className="h-3.5 w-3.5" /> },
     { id: "inspector", label: "Inspector", icon: <Icons.inspect className="h-3.5 w-3.5" /> },
     { id: "demo", label: "Demo", icon: <Icons.play className="h-3.5 w-3.5" /> },
   ];
@@ -271,6 +317,23 @@ export default function Page() {
             </div>
 
             <div className="order-2 ml-auto flex items-center gap-1.5 sm:order-3">
+              {/* Dark mode toggle (Section 12) */}
+              <button
+                onClick={() => setDark((d) => !d)}
+                title={dark ? "Switch to light mode" : "Switch to dark mode"}
+                aria-label="Toggle dark mode"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50"
+              >
+                {dark ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                    <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+                  </svg>
+                )}
+              </button>
               {/* Active AI settings indicator */}
               {(aiSettings.agentRole || aiSettings.customSystemPrompt || aiSettings.outputFormat !== "auto") && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">
@@ -310,12 +373,15 @@ export default function Page() {
                 outputMode={outputMode} setOutputMode={setOutputMode}
                 aiSettings={aiSettings} onAiSettingsUpdate={updateAiSettings}
                 onAsk={run} onClear={clearQuestion} resp={resp} loading={loading} error={error}
+                streamingText={streamingText}
                 onOpenInspector={() => setTab("inspector")}
                 onUploadPdf={handlePdf} onUploadSqlite={handleSqlite} onReset={handleReset}
                 pdfBusy={pdfBusy} sqliteBusy={sqliteBusy} resetting={resetting}
                 pdfMsg={pdfMsg} pdfErr={pdfErr} dbMsg={dbMsg} dbErr={dbErr}
+                examples={examples}
               />
             )}
+            {tab === "studio" && <WorkspaceView />}
             {tab === "inspector" && <Inspector resp={resp} />}
             {tab === "demo" && (
               <Demo examples={examples} sources={sources} config={config} inventory={inventory}

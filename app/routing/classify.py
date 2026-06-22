@@ -188,7 +188,7 @@ def _is_general_knowledge(question: str) -> bool:
         return False
 
 
-def classify(question: str, capability_brief: str):
+def classify(question: str, capability_brief: str, agent_role: str | None = None):
     s = get_settings()
     llm = get_llm()
     fallback_decision = rule_route(question)
@@ -196,7 +196,12 @@ def classify(question: str, capability_brief: str):
     def _fallback() -> dict:
         return fallback_decision.model_dump()
 
-    user = f"Available sources:\n{capability_brief}\n\nQuestion: {question}"
+    # The agent's role can bias which source the router prefers (Section 2.1) — e.g. a
+    # "legal analyst" leans toward contract PDFs. It is a hint, not an override.
+    role_hint = (f"\n\nThe user is acting as: {agent_role}. If relevant, prefer the "
+                 f"source most useful to that role, but only when it can actually answer."
+                 if agent_role else "")
+    user = f"Available sources:\n{capability_brief}\n\nQuestion: {question}{role_hint}"
     data, call = llm.structured(
         purpose="routing", model=s.model_router, system=_SYSTEM, user=user,
         schema=_ROUTE_SCHEMA, fallback=_fallback,
