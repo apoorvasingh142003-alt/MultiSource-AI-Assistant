@@ -1,119 +1,21 @@
 "use client";
 import React from "react";
-import type { AskResponse, IngestResult, Inventory } from "@/lib/types";
-import {
-  Button, Card, EmptyState, Icons, Pill, SectionTitle, cn, isRTL,
-} from "./ui";
-import AnswerPanel from "./AnswerPanel";
-import RoleSelector from "./RoleSelector";
-import AiSettingsPanel from "./AiSettingsPanel";
+import type { Inventory } from "@/lib/types";
+import { Button, Card, Icons, Pill, cn } from "./ui";
 
-const OUTPUT_MODES = [
-  {
-    name: "Standard Response",
-    description: "Balanced answer with clear evidence-backed conclusions",
-  },
-  {
-    name: "Executive Summary",
-    description: "Concise leadership-ready summary with key takeaways",
-  },
-  {
-    name: "Detailed Report",
-    description: "Structured deeper analysis with supporting evidence",
-  },
-  {
-    name: "Timeline",
-    description: "Date, event, description, impact, and status",
-  },
-  {
-    name: "Comparison Table",
-    description: "Side-by-side findings, metrics, ranking, and conclusions",
-  },
-  {
-    name: "Risk Assessment",
-    description: "Risks, likelihood, impact, evidence strength, and actions",
-  },
-  {
-    name: "Action Plan",
-    description: "Recommended next steps organized by priority",
-  },
-  {
-    name: "Decision Matrix",
-    description: "Options scored against decision criteria",
-  },
-  {
-    name: "SWOT Analysis",
-    description: "Strengths, weaknesses, opportunities, and threats",
-  },
-  {
-    name: "Audit Report",
-    description: "Findings, evidence, gaps, and remediation notes",
-  },
-  {
-    name: "Financial Review",
-    description: "Cost, revenue, exposure, and financial implications",
-  },
-  {
-    name: "Legal Review",
-    description: "Obligations, clauses, risks, and compliance concerns",
-  },
-  {
-    name: "Medical Assessment",
-    description: "Clinical-style evidence review with uncertainty called out",
-  },
-];
-
-function OutputModeSelector({
-  outputMode,
-  onOutputModeChange,
-}: {
-  outputMode: string;
-  onOutputModeChange: (mode: string) => void;
-}) {
-  const current = OUTPUT_MODES.find((m) => m.name === outputMode) ?? OUTPUT_MODES[0];
-
-  return (
-    <Card className="p-4">
-      <SectionTitle hint="controls the answer format">Output Mode</SectionTitle>
-      <label className="sr-only" htmlFor="output-mode">Output mode</label>
-      <select
-        id="output-mode"
-        value={current.name}
-        onChange={(e) => onOutputModeChange(e.target.value)}
-        className="focus-ring w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[13px] font-medium text-slate-700 transition hover:border-indigo-300"
-      >
-        {OUTPUT_MODES.map((mode) => (
-          <option key={mode.name} value={mode.name}>{mode.name}</option>
-        ))}
-      </select>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-slate-500">
-        {current.description}
-      </p>
-    </Card>
-  );
-}
+const LANG_LABEL: Record<string, string> = { de: "German", en: "English" };
 
 /* ---------------- upload control ---------------- */
 function UploadCard({
   title, accept, hint, multiple, icon, busy, onFiles, lastMessage, lastError,
 }: {
-  title: string;
-  accept: string;
-  hint: string;
-  multiple?: boolean;
-  icon: React.ReactNode;
-  busy: boolean;
-  onFiles: (files: File[]) => void;
-  lastMessage?: string | null;
-  lastError?: string | null;
+  title: string; accept: string; hint: string; multiple?: boolean;
+  icon: React.ReactNode; busy: boolean; onFiles: (files: File[]) => void;
+  lastMessage?: string | null; lastError?: string | null;
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [over, setOver] = React.useState(false);
-
-  const pick = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    onFiles(Array.from(list));
-  };
+  const pick = (list: FileList | null) => { if (list && list.length) onFiles(Array.from(list)); };
 
   return (
     <div>
@@ -133,9 +35,7 @@ function UploadCard({
         <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden"
           onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
       </div>
-      {busy && (
-        <div className="progress-track progress-indeterminate mt-2 h-1.5 w-full" />
-      )}
+      {busy && <div className="progress-track progress-indeterminate mt-2 h-1.5 w-full" />}
       {!busy && lastError && (
         <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-rose-600">
           <Icons.alert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{lastError}
@@ -150,7 +50,6 @@ function UploadCard({
   );
 }
 
-/* ---------------- inventory ---------------- */
 function timing(ms: number, origin: string) {
   if (origin === "sample") return "preloaded";
   if (ms >= 1000) return `indexed in ${(ms / 1000).toFixed(1)} s`;
@@ -175,7 +74,7 @@ function DocRow({ d }: { d: Inventory["documents"][number] }) {
             <Pill tone="emerald"><Icons.check className="h-3 w-3" />indexed</Pill>
             <Pill>{d.chunks_indexed} chunks</Pill>
             {d.pages ? <Pill>{d.pages} pages</Pill> : null}
-            {d.languages.map((l) => <Pill key={l}>{l === "he" ? "Hebrew" : l === "en" ? "English" : l}</Pill>)}
+            {d.languages.map((l) => <Pill key={l}>{LANG_LABEL[l] ?? l}</Pill>)}
           </>
         )}
         <span className="ml-auto text-[10.5px] text-slate-400">{timing(d.ingestion_ms, d.origin)}</span>
@@ -241,44 +140,20 @@ function DbRow({ d }: { d: Inventory["databases"][number] }) {
   );
 }
 
-/* ================= main ================= */
+/* ================= main — sources only ================= */
 export default function Workspace({
-  inventory, question, setQuestion, role, setRole, outputMode, setOutputMode, aiSettings, onAiSettingsUpdate, onAsk, onClear, resp, loading, error,
-  onOpenInspector, onUploadPdf, onUploadSqlite, onReset,
-  pdfBusy, sqliteBusy, resetting, pdfMsg, pdfErr, dbMsg, dbErr, examples = [], streamingText = "",
+  inventory, onUploadPdf, onUploadSqlite, onReset,
+  pdfBusy, sqliteBusy, resetting, pdfMsg, pdfErr, dbMsg, dbErr,
 }: {
   inventory: Inventory | null;
-  examples?: { label: string; question: string }[];
-  streamingText?: string;
-  question: string;
-  setQuestion: (q: string) => void;
-  role: string | null;
-  setRole: (r: string | null) => void;
-  outputMode: string;
-  setOutputMode: (mode: string) => void;
-  aiSettings: { agentRole: string; customSystemPrompt: string; outputFormat: string; multiAgent: boolean };
-  onAiSettingsUpdate: (patch: Partial<{ agentRole: string; customSystemPrompt: string; outputFormat: string; multiAgent: boolean }>) => void;
-  onAsk: (q: string) => void;
-  onClear: () => void;
-  resp: AskResponse | null;
-  loading: boolean;
-  error: string | null;
-  onOpenInspector: () => void;
   onUploadPdf: (files: File[]) => void;
   onUploadSqlite: (files: File[]) => void;
   onReset: () => void;
-  pdfBusy: boolean;
-  sqliteBusy: boolean;
-  resetting: boolean;
-  pdfMsg: string | null;
-  pdfErr: string | null;
-  dbMsg: string | null;
-  dbErr: string | null;
+  pdfBusy: boolean; sqliteBusy: boolean; resetting: boolean;
+  pdfMsg: string | null; pdfErr: string | null; dbMsg: string | null; dbErr: string | null;
 }) {
   const docs = inventory?.documents ?? [];
   const dbs = inventory?.databases ?? [];
-  // The Workspace is the user's own clean environment — it only ever shows their uploads.
-  // Sample data lives exclusively in the Demo tab.
   const uploadedDocs = docs.filter((d) => d.origin === "uploaded");
   const uploadedDbs = dbs.filter((d) => d.origin === "uploaded");
   const hasUploads = uploadedDocs.length > 0 || uploadedDbs.length > 0;
@@ -286,154 +161,62 @@ export default function Workspace({
   const uploadedTables = uploadedDbs.reduce((a, d) => a + d.tables.length, 0);
 
   const confirmReset = () => {
-    if (window.confirm("Clear all uploaded sources and return to the sample data? This cannot be undone.")) {
-      onReset();
-    }
+    if (window.confirm("Clear all uploaded sources and return to the sample data? This cannot be undone.")) onReset();
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
-      {/* ---- left: source management ---- */}
-      <aside className="space-y-4">
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-              <Icons.upload className="h-3.5 w-3.5 text-indigo-500" /> Add sources
-            </h2>
-            {hasUploads && (
-              <Button variant="ghost" size="sm" onClick={confirmReset} disabled={resetting}
-                title="Remove all uploaded sources and return to the sample data">
-                <Icons.refresh className={cn("h-3.5 w-3.5", resetting && "animate-spin")} />Reset workspace
-              </Button>
-            )}
-          </div>
-          <div className="space-y-3">
-            <UploadCard
-              title="Upload PDF documents" accept=".pdf" multiple
-              hint="Drag & drop or click — contracts, briefs, reports"
-              icon={<Icons.doc className="h-4 w-4" />}
-              busy={pdfBusy} onFiles={onUploadPdf} lastMessage={pdfMsg} lastError={pdfErr} />
-            <UploadCard
-              title="Upload SQLite database" accept=".db,.sqlite,.sqlite3" multiple
-              hint="Drag & drop or click — .db / .sqlite files"
-              icon={<Icons.db className="h-4 w-4" />}
-              busy={sqliteBusy} onFiles={onUploadSqlite} lastMessage={dbMsg} lastError={dbErr} />
-          </div>
-        </Card>
+    <div className="mx-auto max-w-3xl space-y-4">
+      <div>
+        <h2 className="text-[18px] font-bold text-slate-900">Workspace sources</h2>
+        <p className="mt-0.5 text-[13px] text-slate-500">
+          Upload PDFs and SQLite databases here. Then head to <span className="font-medium text-indigo-600">Chat</span> to
+          ask questions grounded in your sources.
+        </p>
+      </div>
 
-        <Card className="p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-              <Icons.layers className="h-3.5 w-3.5 text-indigo-500" /> Your workspace
-            </h2>
-            {hasUploads && (
-              <span className="text-[11px] text-slate-400">
-                {uploadedChunks} chunks · {uploadedTables} tables
-              </span>
-            )}
-          </div>
-
-          {hasUploads ? (
-            <div className="space-y-2">
-              {uploadedDocs.map((d) => <DocRow key={d.name} d={d} />)}
-              {uploadedDbs.map((d) => <DbRow key={d.name} d={d} />)}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-3 py-5 text-center text-[12px] leading-relaxed text-slate-400">
-              Your workspace is empty. Upload a PDF or SQLite database above to ask questions
-              about your own data — answers come only from what you add here.
-              <span className="mt-1 block text-slate-400">
-                Want to see it in action first? The <span className="font-medium text-indigo-500">Demo</span> tab
-                runs on sample contracts &amp; a business database.
-              </span>
-            </div>
+      <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+            <Icons.upload className="h-3.5 w-3.5 text-indigo-500" /> Add sources
+          </h3>
+          {hasUploads && (
+            <Button variant="ghost" size="sm" onClick={confirmReset} disabled={resetting}
+              title="Remove all uploaded sources and return to the sample data">
+              <Icons.refresh className={cn("h-3.5 w-3.5", resetting && "animate-spin")} />Reset workspace
+            </Button>
           )}
-        </Card>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <UploadCard title="Upload PDF documents" accept=".pdf" multiple
+            hint="Drag & drop or click — contracts, briefs, reports"
+            icon={<Icons.doc className="h-4 w-4" />}
+            busy={pdfBusy} onFiles={onUploadPdf} lastMessage={pdfMsg} lastError={pdfErr} />
+          <UploadCard title="Upload SQLite database" accept=".db,.sqlite,.sqlite3" multiple
+            hint="Drag & drop or click — .db / .sqlite files"
+            icon={<Icons.db className="h-4 w-4" />}
+            busy={sqliteBusy} onFiles={onUploadSqlite} lastMessage={dbMsg} lastError={dbErr} />
+        </div>
+      </Card>
 
-        <RoleSelector selectedRole={role} onRoleChange={setRole} />
-        <AiSettingsPanel settings={aiSettings} onUpdate={onAiSettingsUpdate} />
-        <OutputModeSelector outputMode={outputMode} onOutputModeChange={setOutputMode} />
-      </aside>
-
-      {/* ---- right: ask + answer ---- */}
-      <main className="space-y-4">
-        <Card className="p-3">
-          <textarea
-            value={question} onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onAsk(question); }}
-            rows={3} dir={isRTL(question) ? "rtl" : "ltr"}
-            placeholder="Ask a question about your documents and data…"
-            className="focus-ring min-h-[88px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[15px] text-slate-800 placeholder:text-slate-400" />
-          <div className="mt-2.5 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400">Press ⌘/Ctrl + Enter to ask</span>
-            <div className="flex items-center gap-2">
-              {(question || resp) && !loading && (
-                <Button variant="ghost" size="md" onClick={onClear} title="Clear the question and answer">
-                  <Icons.x className="h-3.5 w-3.5" />Clear
-                </Button>
-              )}
-              <Button size="md" onClick={() => onAsk(question)} disabled={loading || !question.trim()}>
-                {loading
-                  ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
-                  : <Icons.spark className="h-4 w-4" />}
-                {loading ? "Working…" : "Ask"}
-              </Button>
-            </div>
+      <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+            <Icons.layers className="h-3.5 w-3.5 text-indigo-500" /> Your workspace
+          </h3>
+          {hasUploads && <span className="text-[11px] text-slate-400">{uploadedChunks} chunks · {uploadedTables} tables</span>}
+        </div>
+        {hasUploads ? (
+          <div className="space-y-2">
+            {uploadedDocs.map((d) => <DocRow key={d.name} d={d} />)}
+            {uploadedDbs.map((d) => <DbRow key={d.name} d={d} />)}
           </div>
-        </Card>
-
-        {error && (
-          <Card className="flex items-start gap-2 px-4 py-3 text-[13px] text-amber-700 ring-1 ring-amber-200">
-            <Icons.alert className="mt-0.5 h-4 w-4 shrink-0" />{error}
-          </Card>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-3 py-5 text-center text-[12px] leading-relaxed text-slate-400">
+            Your workspace is empty. Upload a PDF or SQLite database above to ask questions about your own data —
+            answers come only from what you add here.
+          </div>
         )}
-
-        {loading && !streamingText && (
-          <Card className="p-10 text-center">
-            <div className="mx-auto mb-3 h-7 w-7 animate-spin rounded-full border-2 border-slate-200 border-t-indigo-500" />
-            <span className="text-[13px] text-slate-500">Routing → retrieving → grounding…</span>
-          </Card>
-        )}
-
-        {loading && streamingText && (
-          <Card className="p-5">
-            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-indigo-500">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />Streaming answer
-            </div>
-            <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700"
-              dir={isRTL(streamingText) ? "rtl" : "ltr"}>
-              {streamingText}
-              <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-indigo-400 align-middle" />
-            </p>
-          </Card>
-        )}
-
-        {resp && !loading && <AnswerPanel resp={resp} onOpenInspector={onOpenInspector} />}
-
-        {!resp && !loading && !error && (
-          <Card>
-            <EmptyState icon={<Icons.spark className="h-6 w-6" />} title="Ask anything">
-              Upload your own PDFs and SQLite databases on the left, then ask a question — answers are
-              grounded in your sources with verifiable citations. General-knowledge questions are answered
-              from the model and clearly labelled.
-            </EmptyState>
-            {examples.length > 0 && (
-              <div className="mt-1 flex flex-wrap justify-center gap-2 px-4 pb-5">
-                {examples.slice(0, 6).map((ex) => (
-                  <button
-                    key={ex.question}
-                    onClick={() => { setQuestion(ex.question); onAsk(ex.question); }}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600"
-                    title={ex.question}
-                  >
-                    {ex.label || ex.question.slice(0, 40)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
-      </main>
+      </Card>
     </div>
   );
 }

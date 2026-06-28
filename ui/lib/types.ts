@@ -158,6 +158,22 @@ export interface MultiAgentTrace {
   synthesis_reasoning: string;
 }
 
+/* ---------------- iterative agent (LangGraph) ---------------- */
+export interface AgentStepTrace {
+  iteration: number;
+  tool: string;
+  args: Record<string, unknown>;
+  observation: string;
+  evidence_ids: string[];
+}
+
+export interface AgentTrace {
+  original_question: string;
+  iterations: number;
+  tools_used: string[];
+  steps: AgentStepTrace[];
+}
+
 export interface Trace {
   question: string;
   languages: string[];
@@ -177,6 +193,7 @@ export interface Trace {
   mode: string;
   generation_steps: GenerationStep[];
   multi_agent_trace?: MultiAgentTrace | null;
+  agent_trace?: AgentTrace | null;
 }
 
 export interface AskResponse {
@@ -189,6 +206,7 @@ export interface AskResponse {
   hallucination_risk_score?: number | null;
   contradictions: ContradictionResult[];
   multi_agent_trace?: MultiAgentTrace | null;
+  agent_trace?: AgentTrace | null;
 }
 
 export interface ExampleQuestion {
@@ -284,6 +302,7 @@ export interface Message {
   route?: string | null;
   confidence?: number | null;
   created_at: string;
+  edited_at?: string | null;
 }
 
 /* ---------------- workspaces & artifacts (Section 7) ---------------- */
