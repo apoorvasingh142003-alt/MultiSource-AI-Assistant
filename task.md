@@ -1,115 +1,91 @@
-# AI Business Assistant — Upgrade Task Tracker
+# Nexus AI — Enterprise Upgrade Task Tracker
 
-> Status reflects an evidence-based audit of the existing code (2026-06-19), not assumptions.
-> `[x]` = implemented & verified · `[ ]` = to do · 🟡 = partially there (see note).
-> Full reasoning in `IMPLEMENTATION_PLAN.md`. Phases (P0–P9) give execution order.
+> Branch `enterprise-upgrade`. `[x]` = implemented & verified. Full reasoning in `IMPLEMENTATION_PLAN.md`.
+> Suite: **56 passed, 10 skipped** · UI `tsc` + `next build` clean.
 
-## Phase 0 — Stabilize baseline ✅
-- [x] Fix UI compile error: `Workspace.tsx:246` now destructures `aiSettings` / `onAiSettingsUpdate`
-- [x] `npx tsc --noEmit` clean + `next build` clean (BUILD_EXIT=0)
-- [x] Add `pytest`/`httpx` to `requirements-dev.txt`; backend suite green (34 pass / 10 skip)
-- [x] Backend serves `/health` (9 docs, 65 chunks, 5 tables) + offline `/ask` round-trips (200)
+## Backend
 
-## Section 0 — Critical Bug Fixes (GENERAL_KNOWLEDGE Route)
-- [x] Add `GENERAL_KNOWLEDGE` to `Route` in `app/models.py` (models.py:14)
-- [x] Secondary classifier NONE→GK in `classify.py` (classify.py:160-214)
-- [x] Handle `GENERAL_KNOWLEDGE` in `orchestrator.py` (synthetic evidence, orchestrator.py:152-191)
-- [x] GK generation in `generate.py` (generate.py:268-339)
-- [x] Skip verification for GK (orchestrator.py:177-191)
-- [x] UI types + blue chip badge for GK (VerificationBadge.tsx:20-26, AnswerPanel.tsx:66-71)
+### B1 — Per-request temperature
+- [x] `temperature` threaded `structured`/`text` → `_run` → `_dispatch` → `_call_openai`/`_call_anthropic`
+- [x] Folded into cache key only when non-zero (temp-0 cache preserved)
+- [x] Threaded through `generate_answer`/`generate_general_knowledge` → orchestrator → engine → `AskRequest`
+- [x] Routing + SQL stay deterministic (temperature 0)
 
-## Section 1 — Multi-Source & Multi-Purpose Routing
-- [x] Domain-agnostic router prompt (classify.py:42-82)
-- [x] Dynamic `describe()` in sources (document_source.py:19-48, relational_source.py:47-75)
+### B2 — Multi-turn conversation
+- [x] `app/conversation.py`: `load_history` (rowid-ordered) + `format_history_block` (char cap, recent-first)
+- [x] `AskRequest.conversation_history`; engine loads from `session_id` when omitted
+- [x] History fed to `classify()` (reference-resolving routing) and `generate_answer` (context, not evidence)
+- [x] Live-verified: "the first of those customers" resolves across turns
 
-## Section 2 — Custom Prompt & Role Injection
-- [x] `custom_system_prompt`, `agent_role` on request (models.py:181-182)
-- [x] Generation handles custom prompts, grounding preserved (generate.py:105-145)
-- [x] `AiSettingsPanel.tsx` (role presets, 500-char counter, format, localStorage, multi-agent toggle)
-- [x] Pass `agent_role` to router so it can bias routing (`classify(..., agent_role=)`) (P8)
+### B3 — Message edit / delete / regenerate
+- [x] `PATCH /sessions/{sid}/messages/{mid}` (sets `edited_at`)
+- [x] `DELETE /sessions/{sid}/messages/{mid}`
+- [x] `POST /sessions/{sid}/messages/{mid}/regenerate` (rebuilds context, re-runs, overwrites)
+- [x] `edited_at` column via idempotent migration; rowid tiebreaker for same-second ordering
 
-## Section 3 — Structured Output Formatting
-- [x] `output_format` on request + all 7 directives injected (generate.py:78-102)
-- [x] `tableParser.ts`
-- [x] `AnswerTable.tsx` (sortable, pagination >10, CSV export, copy, timeline accent)
-- [x] Table rendering wired into `AnswerPanel`
+### B4 — Real token streaming
+- [x] `LLMClient.stream_text` (OpenAI/Anthropic native streaming; offline chunks cached/fallback text)
+- [x] `generate_answer_stream` (prose mode; `[eN]` citations recovered post-hoc and verified)
+- [x] `/ask/stream` rewritten: worker thread + `asyncio.Queue`; real token deltas; word fallback for non-streaming paths
+- [x] Verified: 340 token deltas on a document answer
 
-## Section 4 — Read Aloud
-- [x] `ReadAloud.tsx` core (play/pause/stop, speed, voice, strip citations)
-- [x] Boundary tracking → live "now reading" sentence caption (P7) — in-answer inline highlight remains a 🟡 nice-to-have
-- [x] Voice list filtered by detected language (EN/HE) (P7)
-- [x] Unsupported-browser tooltip (disabled button + title) (P7)
+### B5 — LangGraph iterative agent
+- [x] `app/agent/tools.py` — `sql_query` / `search_documents` wrap existing sources; shared `AgentRunContext`
+- [x] `app/agent/graph.py` — `StateGraph` agent⇄tools loop (ChatOpenAI + bind_tools, recursion cap)
+- [x] `app/agent/runner.py` — runs the graph, rebuilds the standard `Trace`, runs existing verify/contributions/contradiction/risk
+- [x] `Trace.agent_trace` (additive); `agent_mode` toggle; import-guarded `agent_available()`
+- [x] SSE `agent_step` / `agent_observation` events; graceful offline fallback to classic path
+- [x] Verified: HYBRID question uses both tools, 6 evidence, populated Inspector/Explainability
 
-## Section 5 — Chat History
-- [x] `migrations.py` with sessions/messages tables (migrations.py:17-31)
-- [x] Session API endpoints (GET/POST/DELETE/PATCH + messages)
-- [x] `ChatSidebar.tsx` (collapsible, grouped, search, rename/delete)
-- [x] **Wire auto-save: `/ask` persists user Q + assistant A** with route/confidence (P2, verified: 4 msgs)
-- [x] Auto-create session (INSERT OR IGNORE) + 60-char auto-title (P2)
-- [x] `get_session_db()` self-heals schema (works under TestClient / cold start) (P2)
+### B6 — Semantic chunking
+- [x] Sentence-respecting, structure-aware chunking (~900 chars, 180 overlap) replacing fixed window; deterministic ids
+- [x] Hard-window fallback only for pathologically long sentences
 
-## Section 6 — Explainability Mode
-- [x] **Compute `contribution_percentage`** per evidence ([eN] count / total) — `analysis.compute_contributions` (P1, live-verified)
-- [x] **Populate `trust_factors`** (retrieval/rerank/is_primary/summary) — `analysis.attach_trust_factors` (P1)
-- [x] Complete `generation_steps` (routing/sql_generation/document_retrieval/generation/verification) — orchestrator (P1)
-- [x] `ExplainabilityPanel.tsx` flowchart + contribution chart + trust list + SQL details
-- [x] **Citation Map** sub-panel (2-col [eN] ↔ evidence, clickable highlight) (P7)
+### B7 — German replaces Hebrew
+- [x] Generic `detect_language` (German vs English); RTL repair retired
+- [x] Router detects German (`["de"]`), German contract vocabulary; example + tests updated
+- [x] German sample contract (`TABOR_Vertrag_DE.pdf`) + reseeded DB; Hebrew files removed
+- [x] Verified: German question routes PDF, retrieves German contract, answers in German
 
-## Section 7 — Workspace Mode
-- [x] Workspace/artifact tables + 7 endpoints + `/generate` (routes.py)
-- [x] Per-artifact-type generation directives (`_ARTIFACT_DIRECTIVES`: report/ppt_content/action_plan/summary) (P4)
-- [x] `WorkspaceView.tsx` artifact library UI (cards + preview, new Studio tab) (P4)
-- [x] Artifact modal: render (tables via AnswerTable, JSON code block) + export .txt/.md + copy + Regenerate (P4)
-- [x] PPT "slides preview" toggle (P4)
-- [x] "Generate New Artifact" dialog (P4)
+## Frontend
 
-## Section 8 — Verification Layer
-- [x] **Cross-source contradiction detection** (pairwise LLM) — `analysis.detect_contradictions` (P1, live-verified: 4 pair checks)
-- [x] **Populate `contradictions[]` + `verification_warning`** — orchestrator (P1)
-- [x] **Compute `hallucination_risk_score`** (spec formula) — `analysis.compute_hallucination_risk` (P1)
-- [x] `VerificationBadge.tsx` (verified / contradictions / unverified / GK)
-- [x] New LLM calls counted in pricing; OpenAI model prices added (P1)
+### F-API — client + types
+- [x] `AskOptions` with `temperature` / `agent_mode` / `conversation_history`
+- [x] `askStream` handles `agent_step` / `agent_observation`; `AbortSignal` support
+- [x] `editMessage` / `deleteMessage` / `regenerateMessage`; `Message.edited_at`; `AgentTrace` types
 
-## Section 9 — Project Memory
-- [x] project_memory table + 3 CRUD endpoints (routes.py)
-- [x] **`app/memory.py`** — extraction + retrieval logic (P3, verified: 5 items stored)
-- [x] LLM memory-extraction pass after workspace Q&A (`extract_and_store`) (P3)
-- [x] Inject relevant memory into generation context (`get_memory_context` → custom_system_prompt) (P3)
-- [x] `MemoryViewer.tsx` + Memory tab (confidence bar, forget, add) (P3)
+### F0 — State lifecycle
+- [x] Single settings store (`useAiSettings`) — one localStorage key, single source of truth
+- [x] `activeSessionId` persisted; conversation restored on reload
+- [x] Consistent loading / streaming / empty / error states
 
-## Section 10 — Multi-Agent Reasoning
-- [x] **Multi-agent orchestration** `app/multi_agent.py`: decompose → ThreadPool fan-out → synthesize (P5, live: 3 sub-Qs)
-- [x] Populate `multi_agent_trace`; trigger on `multi_agent` flag OR multi-part heuristic (`is_multipart`) (P5)
-- [x] `MultiAgentTrace.tsx` wired in `AnswerPanel` (renders the tree when present) (P5)
-- [ ] UI toggle to force multi-agent (add to AI Settings) — P7
+### F1 — Removals
+- [x] Demo tab deleted (tab + render + component)
+- [x] Response-Style (RoleSelector) panel deleted — role lives only in AI Settings
 
-## Section 11 — Workflow Automation
-- [x] workflows table + 3 endpoints (routes.py)
-- [x] **`app/workflow.py`** executor + asyncio cron scheduler (started in main.py) (P6, verified: 2-step run → 2 artifacts)
-- [x] Scheduled (cron, no extra deps) + manual triggers; status tracking (P6)
-- [x] `WorkflowBuilder.tsx` + Workflows tab (in Studio) (P6)
-- [x] Shared `app/artifacts.py` (generate_artifact_core reused by route + workflows) (P6)
+### F2 — Chat experience
+- [x] `Chat` tab (default) with threaded conversation (`ChatThread.tsx`)
+- [x] Token streaming render + live agent-step panel
+- [x] Per-turn edit / delete / regenerate / copy; ChatGPT-style composer (Enter to send)
+- [x] Workspace slimmed to sources-only (uploads + inventory)
 
-## Section 12 — UI/UX Global Improvements
-- [x] `ui/lib/i18n.ts` (EN/HE base strings)
-- [x] Layout restructure (`page.tsx` sidebar + main + settings + tabs)
-- [x] Answer card anatomy (`AnswerPanel.tsx`)
-- [x] Dark mode via CSS vars + `prefers-color-scheme`; RTL Hebrew detection
-- [x] `types.ts` + `api.ts` with new types/endpoints
-- [x] Ctrl+K (new chat) shortcut
-- [x] Ctrl+Enter (submit, in question box) + Ctrl+E (toggle explainability, via event) (P7)
-- [x] Manual dark-mode toggle in top nav (+ globals.css manual override) (P7)
-- [x] Empty-state example question chips (populate + ask) (P7)
-- [x] Loading state on answer (spinner card present) (P7)
-- [ ] 🟡 Mobile bottom-sheet drawer (<768px) — sidebar already collapses to rail; deferred polish
-- [ ] 🟡 Finish i18n adoption for new Studio/MemoryViewer/Workflow strings — deferred polish
-- [x] **SSE streaming**: `/ask/stream` `StreamingResponse` (status→route→delta→done) + `askStream` client + live render (P8)
+### F3 — Merged Output control
+- [x] One `Output` dropdown (`OUTPUT_OPTIONS` → `{output_mode, output_format}`); overlaps deduped
 
-## Section 13 — Constraints & Tests
-- [x] New tables via idempotent startup migration (main.py) + self-healing `get_session_db`
-- [x] Proper HTTP status codes — 201 on POST creates (P8); deletes return 200 + body
-- [x] Tests: GENERAL_KNOWLEDGE routing path (`tests/test_upgrade_features.py`) (P9)
-- [x] Tests: SQL validation (SELECT/LIMIT/DDL-DML/allow-list/multi-stmt) (P9)
-- [x] Tests: contradiction detection + contribution + hallucination-risk (P9)
-- [x] Live end-to-end validation (PDF/SQL/HYBRID/GENERAL_KNOWLEDGE) ✓; Docker sanity (no new deps, `COPY app`) ✓ (P9)
-- [x] Full suite: **49 passed, 10 skipped**; UI `tsc` + `next build` clean
+### F4 — Settings panel
+- [x] Settings modal: applied temperature slider (0–1, labelled), theme, default role/output, reasoning toggles
+- [x] API-key / local-model sections scaffolded as "coming soon" (deferred)
+
+### F5 — Evidence
+- [x] Full evidence text (scrollable, never truncated); section names full-on-hover
+
+### F6 — German + polish
+- [x] German language labels; Hebrew RTL checks dropped; agent-timeline panel on completed answers
+- [x] Settings/agent/temperature badges in the top bar + composer
+
+## Constraints & tests
+- [x] Additive request/trace fields + SSE events; classic path unchanged
+- [x] Idempotent migration (`edited_at`); rowid ordering tiebreaker
+- [x] Agent deps import-guarded; offline path needs no LangChain
+- [x] `tests/test_chat_upgrade.py` (temperature, history, message CRUD, agent fallback)
+- [x] Full suite **56 passed / 10 skipped**; UI `tsc` + `next build` clean

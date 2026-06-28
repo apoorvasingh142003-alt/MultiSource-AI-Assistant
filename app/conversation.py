@@ -30,9 +30,11 @@ def load_history(session_id: Optional[str],
         return []
     db = get_session_db()
     try:
+        # rowid is the tiebreaker: created_at has only second resolution, so two messages
+        # saved in the same second must still order by insertion order.
         rows = db.execute(
             "SELECT role, content FROM messages WHERE session_id = ? "
-            "ORDER BY created_at DESC LIMIT ?",
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
             (session_id, max_turns),
         ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]

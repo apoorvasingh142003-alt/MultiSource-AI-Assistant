@@ -335,7 +335,7 @@ def get_session_messages(session_id: str) -> list[dict]:
     try:
         rows = db.execute(
             "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
-            "FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+            "FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC",
             (session_id,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -471,7 +471,7 @@ def regenerate_message(session_id: str, message_id: str,
     db = get_session_db()
     try:
         target = db.execute(
-            "SELECT id, role, created_at FROM messages WHERE id = ? AND session_id = ?",
+            "SELECT id, role, created_at, rowid FROM messages WHERE id = ? AND session_id = ?",
             (message_id, session_id),
         ).fetchone()
         if not target:
@@ -480,19 +480,19 @@ def regenerate_message(session_id: str, message_id: str,
             raise HTTPException(400, "Regenerate targets an assistant message.")
         # the user question this assistant turn answered = latest user msg before it
         user_msg = db.execute(
-            "SELECT id, content, created_at FROM messages "
-            "WHERE session_id = ? AND role = 'user' AND created_at <= ? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (session_id, target["created_at"]),
+            "SELECT id, content, created_at, rowid FROM messages "
+            "WHERE session_id = ? AND role = 'user' AND rowid < ? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (session_id, target["rowid"]),
         ).fetchone()
         if not user_msg:
             raise HTTPException(400, "No preceding user question to regenerate from.")
         question = user_msg["content"]
-        # context = everything strictly before that user question
+        # context = everything strictly before that user question (rowid = insertion order)
         hist_rows = db.execute(
-            "SELECT role, content FROM messages WHERE session_id = ? AND created_at < ? "
-            "ORDER BY created_at ASC",
-            (session_id, user_msg["created_at"]),
+            "SELECT role, content FROM messages WHERE session_id = ? AND rowid < ? "
+            "ORDER BY rowid ASC",
+            (session_id, user_msg["rowid"]),
         ).fetchall()
         history = [{"role": r["role"], "content": r["content"]} for r in hist_rows]
     finally:
