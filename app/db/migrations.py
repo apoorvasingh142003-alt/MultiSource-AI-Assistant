@@ -94,6 +94,14 @@ def get_session_db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     if not _initialized:
         conn.executescript(_SESSIONS_SCHEMA)
+        # additive column migrations (safe/idempotent)
+        for table, col, decl in (("messages", "edited_at", "TEXT"),):
+            try:
+                cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except Exception:
+                pass
         conn.commit()
         _initialized = True
     return conn

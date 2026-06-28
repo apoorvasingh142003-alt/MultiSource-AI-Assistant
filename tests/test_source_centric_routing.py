@@ -69,11 +69,11 @@ def test_business_routing_preserved(question, expected):
     assert rule_route(question).route == expected
 
 
-def test_hebrew_questions_stay_in_scope():
-    """Hebrew clause questions route to documents (never NONE) — RTL corpus support."""
-    decision = rule_route("מה אומר ההסכם של תבור מערכות על השעיית שירות וקנסות?")
+def test_german_questions_stay_in_scope():
+    """German clause questions route to documents (never NONE) — multilingual corpus support."""
+    decision = rule_route("Was sagt der Vertrag über die Aussetzung des Dienstes und Vertragsstrafen?")
     assert decision.route in ("PDF", "HYBRID")
-    assert decision.languages == ["he"]
+    assert decision.languages == ["de"]
 
 
 def test_none_reasoning_is_evidence_framed_not_scope_framed():

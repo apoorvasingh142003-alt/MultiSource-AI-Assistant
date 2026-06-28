@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,9 @@ def ask(req: AskRequest) -> AskResponse:
             output_format=req.output_format,
             session_id=req.session_id,
             multi_agent=req.multi_agent,
+            agent_mode=req.agent_mode,
+            temperature=req.temperature,
+            conversation_history=req.conversation_history,
         )
     except Exception:  # never leak a stack trace — fail gracefully and honestly
         log.exception("ask() failed for question=%r", question)
@@ -147,24 +151,58 @@ def _sse(event: str, data: dict) -> str:
 
 @router.post("/ask/stream")
 async def ask_stream(req: AskRequest) -> StreamingResponse:
-    """Server-Sent Events variant of /ask (Section 12.3). Runs the full pipeline off the
-    event loop, then streams the answer word-by-word followed by the complete payload."""
+    """Server-Sent Events variant of /ask. The answer is streamed token-by-token as the
+    model generates it (real time-to-first-token); the complete payload (trace, citations,
+    verification) follows in a final ``done`` event. Agent-mode tool steps are emitted as
+    additive ``agent_step`` / ``agent_observation`` events."""
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(400, "Please enter a question.")
 
     async def gen():
         yield _sse("status", {"stage": "processing"})
-        try:
-            resp = await asyncio.to_thread(
-                get_engine().ask, question,
-                scope=req.scope, role=req.role, output_mode=req.output_mode,
-                custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
-                output_format=req.output_format, session_id=req.session_id,
-                multi_agent=req.multi_agent,
-            )
-        except Exception:
-            log.exception("ask_stream failed for question=%r", question)
+        loop = asyncio.get_running_loop()
+        aq: asyncio.Queue = asyncio.Queue()
+        DONE = object()
+        holder: dict = {}
+
+        def on_token(text: str) -> None:
+            if text:
+                loop.call_soon_threadsafe(aq.put_nowait, ("delta", {"text": text}))
+
+        def on_event(event: str, data: dict) -> None:
+            loop.call_soon_threadsafe(aq.put_nowait, (event, data))
+
+        def worker():
+            try:
+                holder["resp"] = get_engine().ask(
+                    question, scope=req.scope, role=req.role, output_mode=req.output_mode,
+                    custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
+                    output_format=req.output_format, session_id=req.session_id,
+                    multi_agent=req.multi_agent, agent_mode=req.agent_mode,
+                    temperature=req.temperature,
+                    conversation_history=req.conversation_history,
+                    on_token=on_token, on_event=on_event,
+                )
+            except Exception as exc:  # noqa: BLE001
+                holder["error"] = exc
+                log.exception("ask_stream worker failed for question=%r", question)
+            finally:
+                loop.call_soon_threadsafe(aq.put_nowait, (DONE, None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        streamed = False
+        while True:
+            kind, payload = await aq.get()
+            if kind is DONE:
+                break
+            if kind == "delta":
+                streamed = True
+            yield _sse(kind, payload)
+
+        resp = holder.get("resp")
+        if resp is None:
             yield _sse("error", {"message": "Engine error while processing the question."})
             return
 
@@ -178,16 +216,19 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
                 log.exception("stream persist failed for session=%s", req.session_id)
 
         yield _sse("route", {"route": resp.trace.route.route if resp.trace.route else None})
-        words = (resp.answer or "").split(" ")
-        buf = ""
-        for i, w in enumerate(words):
-            buf += w + " "
-            if i % 4 == 3:
+        # Fallback: paths that don't stream (multi-agent synthesis, deterministic offline)
+        # still deliver the answer progressively so the UI never sits blank.
+        if not streamed:
+            words = (resp.answer or "").split(" ")
+            buf = ""
+            for i, w in enumerate(words):
+                buf += w + " "
+                if i % 4 == 3:
+                    yield _sse("delta", {"text": buf})
+                    buf = ""
+                    await asyncio.sleep(0.015)
+            if buf:
                 yield _sse("delta", {"text": buf})
-                buf = ""
-                await asyncio.sleep(0.015)
-        if buf:
-            yield _sse("delta", {"text": buf})
         yield _sse("done", json.loads(resp.model_dump_json()))
 
     return StreamingResponse(gen(), media_type="text/event-stream",
@@ -293,7 +334,7 @@ def get_session_messages(session_id: str) -> list[dict]:
     db = get_session_db()
     try:
         rows = db.execute(
-            "SELECT id, session_id, role, content, route, confidence, created_at "
+            "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
             "FROM messages WHERE session_id = ? ORDER BY created_at ASC",
             (session_id,)
         ).fetchall()
@@ -359,6 +400,128 @@ def save_message(
         db.commit()
     finally:
         db.close()
+
+
+class MessageEdit(BaseModel):
+    content: str
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}")
+def edit_message(session_id: str, message_id: str, body: MessageEdit) -> dict:
+    """Edit a message's content in place (records edited_at)."""
+    db = get_session_db()
+    try:
+        cur = db.execute(
+            "UPDATE messages SET content = ?, edited_at = datetime('now') "
+            "WHERE id = ? AND session_id = ?",
+            (body.content, message_id, session_id),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Message not found")
+        row = db.execute(
+            "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
+            "FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        db.close()
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+def delete_message(session_id: str, message_id: str) -> dict:
+    """Delete a single message from a session."""
+    db = get_session_db()
+    try:
+        cur = db.execute(
+            "DELETE FROM messages WHERE id = ? AND session_id = ?",
+            (message_id, session_id),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Message not found")
+        return {"ok": True}
+    finally:
+        db.close()
+
+
+class RegenerateRequest(BaseModel):
+    # Generation settings to reuse for the new answer; the question + session come from
+    # the stored turn so the client doesn't have to resend them.
+    scope: str = "workspace"
+    role: str | None = None
+    output_mode: str = "Standard Response"
+    custom_system_prompt: str | None = None
+    agent_role: str | None = None
+    output_format: str | None = "auto"
+    multi_agent: bool = False
+    agent_mode: bool = False
+    temperature: float | None = None
+
+
+@router.post("/sessions/{session_id}/messages/{message_id}/regenerate",
+             response_model=AskResponse)
+def regenerate_message(session_id: str, message_id: str,
+                       body: RegenerateRequest = Body(default=RegenerateRequest())) -> AskResponse:
+    """Re-answer the user turn that produced assistant message ``message_id``.
+
+    Loads conversation context up to (and including) the preceding user question,
+    re-runs the engine, overwrites the assistant message, and returns the new answer.
+    """
+    db = get_session_db()
+    try:
+        target = db.execute(
+            "SELECT id, role, created_at FROM messages WHERE id = ? AND session_id = ?",
+            (message_id, session_id),
+        ).fetchone()
+        if not target:
+            raise HTTPException(404, "Message not found")
+        if target["role"] != "assistant":
+            raise HTTPException(400, "Regenerate targets an assistant message.")
+        # the user question this assistant turn answered = latest user msg before it
+        user_msg = db.execute(
+            "SELECT id, content, created_at FROM messages "
+            "WHERE session_id = ? AND role = 'user' AND created_at <= ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (session_id, target["created_at"]),
+        ).fetchone()
+        if not user_msg:
+            raise HTTPException(400, "No preceding user question to regenerate from.")
+        question = user_msg["content"]
+        # context = everything strictly before that user question
+        hist_rows = db.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? AND created_at < ? "
+            "ORDER BY created_at ASC",
+            (session_id, user_msg["created_at"]),
+        ).fetchall()
+        history = [{"role": r["role"], "content": r["content"]} for r in hist_rows]
+    finally:
+        db.close()
+
+    resp = get_engine().ask(
+        question, scope=body.scope, role=body.role, output_mode=body.output_mode,
+        custom_system_prompt=body.custom_system_prompt, agent_role=body.agent_role,
+        output_format=body.output_format, session_id=session_id,
+        multi_agent=body.multi_agent, agent_mode=body.agent_mode,
+        temperature=body.temperature, conversation_history=history,
+    )
+
+    # overwrite the assistant message in place (keeps thread position + id)
+    db = get_session_db()
+    try:
+        route = resp.trace.route.route if resp.trace.route else None
+        conf = resp.trace.route.confidence if resp.trace.route else None
+        db.execute(
+            "UPDATE messages SET content = ?, route = ?, confidence = ?, "
+            "edited_at = datetime('now') WHERE id = ?",
+            (resp.answer, route, conf, message_id),
+        )
+        db.commit()
+    except Exception:
+        log.exception("failed to persist regenerated message %s", message_id)
+    finally:
+        db.close()
+    return resp
 
 
 # ==============================================================================

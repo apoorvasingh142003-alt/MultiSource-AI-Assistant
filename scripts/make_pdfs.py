@@ -162,34 +162,35 @@ def project_brief(name: str, customer: str, risks: list[str], mitigations: list[
 
 
 # ---------------------------------------------------------------------------
-# Hebrew contract (logical-order Hebrew; glyphs via DejaVuSans, UI renders RTL)
+# German contract (LTR; showcases multilingual retrieval — cross-lingual embeddings)
 # ---------------------------------------------------------------------------
-def hebrew_contract():
+def german_contract():
     return [
-        ("‎1. הצדדים ומטרת ההסכם", [
-            "הסכם שירותים זה (להלן: &quot;ההסכם&quot;, מספר אסמכתא TVR-MSA-2025) נכרת בין נורת'ווינד פתרונות בע&quot;מ "
-            "(&quot;נותן השירות&quot;) לבין תבור מערכות בע&quot;מ (&quot;הלקוח&quot;) לאספקת שירותי לוגיסטיקה וניהול נתונים.",
+        ("1. Vertragsparteien und Zweck", [
+            "Dieser Dienstleistungsvertrag (der &quot;Vertrag&quot;, Aktenzeichen TVR-MSA-2025) wird zwischen der "
+            "Northwind Solutions GmbH (&quot;Anbieter&quot;) und der Tabor Systeme GmbH (&quot;Kunde&quot;) über die "
+            "Erbringung von verwalteten Logistik- und Datendiensten geschlossen.",
         ]),
-        ("‎2. תקופת ההתקשרות", [
-            "תקופת ההתקשרות הראשונית הינה עשרים וארבעה (24) חודשים ותתחדש מאליה לתקופות נוספות אלא אם נמסרה הודעה "
-            "מוקדמת בכתב של שישים (60) יום.",
+        ("2. Laufzeit und Verlängerung", [
+            "Die anfängliche Laufzeit beträgt vierundzwanzig (24) Monate und verlängert sich automatisch um jeweils "
+            "zwölf (12) Monate, sofern nicht eine Partei mit einer Frist von sechzig (60) Tagen schriftlich kündigt.",
         ]),
-        ("‎3. תשלומים וחשבוניות", [
-            "הלקוח ישלם כל חשבונית שאינה שנויה במחלוקת בתוך שלושים (30) יום ממועד הוצאתה. על סכומים באיחור ייווסף "
-            "קנס פיגורים בשיעור 1.5% לחודש.",
+        ("3. Vergütung und Rechnungsstellung", [
+            "Der Kunde zahlt alle unbestrittenen Rechnungen innerhalb von dreißig (30) Tagen ab Rechnungsdatum. "
+            "Auf überfällige Beträge wird eine Verzugsgebühr von 1,5% pro Monat erhoben.",
         ]),
-        ("‎4. רמת השירות (SLA-2025)", [
-            "נותן השירות יעמוד ברמות השירות המוגדרות בנספח SLA-2025, לרבות זמינות חודשית של 99.5% וזמן תגובה של "
-            "ארבע (4) שעות לתקלות בעדיפות גבוהה.",
+        ("4. Service-Level (SLA-2025)", [
+            "Der Anbieter erfüllt die im Anhang SLA-2025 definierten Service-Level, einschließlich einer monatlichen "
+            "Verfügbarkeit von 99,5% und einer Reaktionszeit von vier (4) Stunden bei Vorfällen mit hoher Priorität.",
         ]),
-        ("‎5. השעיית שירות", [
-            "נותן השירות רשאי להשעות את השירותים אם חשבונית שאינה שנויה במחלוקת לא שולמה במשך למעלה מארבעים וחמישה "
-            "(45) יום ממועד הפירעון, ובכפוף להודעה מוקדמת של חמישה (5) ימי עסקים. השירות יחודש בתוך שני (2) ימי עסקים "
-            "ממועד התשלום המלא.",
+        ("5. Aussetzung des Dienstes", [
+            "Der Anbieter ist berechtigt, die Dienste auszusetzen, wenn eine unbestrittene Rechnung länger als "
+            "fünfundvierzig (45) Tage nach Fälligkeit unbezahlt bleibt, vorbehaltlich einer Vorankündigung von fünf "
+            "(5) Werktagen. Der Dienst wird innerhalb von zwei (2) Werktagen nach vollständiger Zahlung wiederhergestellt.",
         ]),
-        ("‎6. סיום ההסכם וקנסות", [
-            "במקרה של סיום ההסכם על ידי הלקוח מטעמי נוחות לפני תום התקופה, ישלם הלקוח קנס יציאה בשיעור 12% מיתרת "
-            "שווי ההסכם, בנוסף לכל סכום שטרם שולם.",
+        ("6. Kündigung und Vertragsstrafen", [
+            "Kündigt der Kunde den Vertrag vor Ablauf der Laufzeit aus Bequemlichkeit, zahlt der Kunde eine "
+            "Vertragsstrafe in Höhe von 12% des verbleibenden Vertragswerts, zusätzlich zu allen noch offenen Beträgen.",
         ]),
     ]
 
@@ -212,8 +213,8 @@ def main() -> None:
     _build("STARK_Agreement.pdf", "Master Services Agreement — Stark Industries",
            contract("STK-MSA-2025", "Stark Industries", suspend_days=30, penalty_pct=15, late_fee="1.5% per month"))
 
-    _build("TAVOR_Contract_HE.pdf", "‎הסכם שירותים — תבור מערכות בע\"מ",
-           hebrew_contract(), rtl=True, sidecar=True)
+    _build("TABOR_Vertrag_DE.pdf", "Dienstleistungsvertrag — Tabor Systeme GmbH",
+           german_contract())
 
     _build("PRJ_ATLAS_Brief.pdf", "Project Atlas — Implementation Brief (Acme Corporation)",
            project_brief(

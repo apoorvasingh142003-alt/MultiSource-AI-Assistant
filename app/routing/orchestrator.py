@@ -10,7 +10,8 @@ from typing import Optional
 
 from app.generation.analysis import (attach_trust_factors, compute_contributions,
                                      compute_hallucination_risk, detect_contradictions)
-from app.generation.generate import generate_answer, generate_general_knowledge
+from app.generation.generate import (generate_answer, generate_answer_stream,
+                                     generate_general_knowledge)
 from app.generation.verify import verify_citations
 from app.models import (AskResponse, Evidence, GenerationStep, LLMCall, RouteDecision,
                         StageTiming, Trace)
@@ -40,7 +41,10 @@ class Orchestrator:
             output_mode: str = "Standard Response",
             custom_system_prompt: Optional[str] = None,
             agent_role: Optional[str] = None,
-            output_format: Optional[str] = "auto") -> AskResponse:
+            output_format: Optional[str] = "auto",
+            temperature: Optional[float] = None,
+            conversation_history: Optional[list[dict]] = None,
+            on_token=None) -> AskResponse:
         t0 = time.perf_counter()
         trace = Trace(question=question)
         evidence: list[Evidence] = []
@@ -54,7 +58,8 @@ class Orchestrator:
 
         # 1) ROUTE (agent_role can bias source preference — Section 2.1)
         ts = time.perf_counter()
-        decision, route_call = classify(question, self.capability_brief, agent_role=agent_role)
+        decision, route_call = classify(question, self.capability_brief, agent_role=agent_role,
+                                        conversation_history=conversation_history)
         calls.append(route_call)
         trace.route = decision
         trace.languages = decision.languages
@@ -157,11 +162,23 @@ class Orchestrator:
         if (not safety_net_fired and dr and dr.intent == "keyword" and dr.search_terms
                 and is_document_lookup(question)):
             kw_terms = dr.search_terms
-        answer, cited, insufficient, gen_call = generate_answer(
-            question, evidence, keyword_terms=kw_terms, role=role, output_mode=output_mode,
-            custom_system_prompt=custom_system_prompt, agent_role=agent_role,
-            output_format=output_format,
-        )
+        # Stream the grounded answer token-by-token when a sink is provided AND this is a
+        # real LLM generation (not the deterministic keyword-identification answer).
+        stream_gen = on_token is not None and evidence and not kw_terms
+        if stream_gen:
+            answer, cited, insufficient, gen_call = generate_answer_stream(
+                question, evidence, on_token=on_token, role=role, output_mode=output_mode,
+                custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                output_format=output_format, temperature=temperature,
+                conversation_history=conversation_history,
+            )
+        else:
+            answer, cited, insufficient, gen_call = generate_answer(
+                question, evidence, keyword_terms=kw_terms, role=role, output_mode=output_mode,
+                custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                output_format=output_format, temperature=temperature,
+                conversation_history=conversation_history,
+            )
         if not evidence:
             # Nothing was retrieved — give an honest, specific account of what was
             # searched and why no answer could be grounded (never fabricate).
@@ -171,8 +188,10 @@ class Orchestrator:
                     question, role=role, output_mode=output_mode,
                     custom_system_prompt=custom_system_prompt,
                     agent_role=agent_role,
-                    output_format=output_format,
+                    output_format=output_format, temperature=temperature,
                 )
+                if on_token and answer:
+                    on_token(answer)
                 if gen_call:
                     calls.append(gen_call)
                 # Create synthetic evidence
@@ -285,6 +304,11 @@ class Orchestrator:
         trace.cost = summarize(calls)
         trace.mode = _mode(calls)
         trace.timings.append(StageTiming(name="total", duration_ms=_ms(t0)))
+
+        # Non-streamed terminal answers (deterministic keyword lookup, insufficient-
+        # evidence, or any post-stream edit) are delivered once to the live sink.
+        if on_token and not stream_gen and answer:
+            on_token(answer)
 
         cited_set = set(check.cited_ids)
         citations = [e for e in evidence if e.id in cited_set] or (

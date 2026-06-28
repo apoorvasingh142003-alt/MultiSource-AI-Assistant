@@ -96,6 +96,8 @@ def run_multi_agent(
     role: Optional[str], output_mode: str,
     custom_system_prompt: Optional[str], agent_role: Optional[str],
     output_format: Optional[str],
+    temperature: Optional[float] = None,
+    conversation_history: Optional[list[dict]] = None,
 ) -> AskResponse:
     t0 = time.perf_counter()
     calls: list[LLMCall] = []
@@ -116,12 +118,16 @@ def run_multi_agent(
     if len(sub_questions) < 2:
         # nothing to fan out — fall back to a single normal pass
         return orch.ask(question, allowed_docs, allowed_tables, role, output_mode,
-                        custom_system_prompt, agent_role, output_format)
+                        custom_system_prompt, agent_role, output_format,
+                        temperature, conversation_history)
 
-    # 2) PARALLEL SUB-AGENTS — each runs the full route→retrieve→generate pipeline
+    # 2) PARALLEL SUB-AGENTS — each runs the full route→retrieve→generate pipeline.
+    # Sub-questions are self-contained, so they don't carry the conversation history
+    # (only the original question's framing matters here).
     def _run_sub(sq: str) -> AskResponse:
         return orch.ask(sq, allowed_docs, allowed_tables, role, output_mode,
-                        custom_system_prompt, agent_role, output_format)
+                        custom_system_prompt, agent_role, output_format,
+                        temperature)
 
     ts = time.perf_counter()
     with ThreadPoolExecutor(max_workers=min(4, len(sub_questions))) as pool:

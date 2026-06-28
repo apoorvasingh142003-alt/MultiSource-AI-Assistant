@@ -69,7 +69,7 @@ CUSTOMERS = [
     (3, "Initech LLC", "Software", "USA", "accounts@initech.example"),
     (4, "Umbrella Group", "Pharmaceuticals", "UK", "finance@umbrella.example"),
     (5, "Stark Industries", "Aerospace", "USA", "ar@stark.example"),
-    (6, "Tavor Systems", "Technology", "Israel", "finance@tavor.example"),
+    (6, "Tabor Systeme GmbH", "Technology", "Germany", "finanzen@tabor.example"),
 ]
 
 # id, ref, customer_id, title, pdf_file, start, end, value, status, sla
@@ -84,7 +84,7 @@ CONTRACTS = [
      "2024-12-15", "2026-12-15", 300000, "active", "SLA-2025"),
     (5, "STK-MSA-2025", 5, "Master Services Agreement", "STARK_Agreement.pdf",
      "2024-06-29", "2026-06-29", 540000, "active", "SLA-2025"),
-    (6, "TVR-MSA-2025", 6, "Service Agreement (Hebrew)", "TAVOR_Contract_HE.pdf",
+    (6, "TVR-MSA-2025", 6, "Dienstleistungsvertrag (German)", "TABOR_Vertrag_DE.pdf",
      "2024-09-01", "2026-09-01", 220000, "active", "SLA-2025"),
 ]
 

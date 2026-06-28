@@ -1,11 +1,11 @@
-"""PDF ingestion: extract text with real page numbers, normalize RTL (Hebrew),
-and chunk in a section-aware way so every chunk carries document/page/section
+"""PDF ingestion: extract text with real page numbers, detect language, and chunk in a
+structure-aware, sentence-respecting way so every chunk carries document/page/section
 metadata for citations.
 
-RTL note: PDF text extractors return Hebrew runs in reversed (visual) order. We
-restore logical order in the ingestion layer so the index matches logical-order
-Hebrew queries. Latin/numeric runs (e.g. "SLA-2025", "(30)") are already correct
-and are left untouched.
+Multilingual: documents are labelled with a detected language (e.g. German ``de`` vs
+English ``en``). Retrieval is cross-lingual (the multilingual embedding model + Unicode
+BM25 handle German natively), so no per-language text repair is needed — the text is used
+as extracted.
 """
 from __future__ import annotations
 
@@ -16,43 +16,29 @@ from typing import Optional
 
 from pypdf import PdfReader
 
-_HEB = re.compile(r"[֐-׿]")
-_HEADING = re.compile(r"^\s*‎?\s*(\d+)\.\s+\S")
-_CONTROL = re.compile(r"[‎‏‪-‮]")  # bidi control marks
+_HEADING = re.compile(r"^\s*(\d+)\.\s+\S")
 
-
-def _is_hebrew_token(tok: str) -> bool:
-    return bool(_HEB.search(tok))
-
-
-def normalize_rtl(text: str) -> str:
-    """Restore logical reading order for Hebrew runs in extractor output."""
-    if not _HEB.search(text):
-        return text
-    out_lines = []
-    for line in text.split("\n"):
-        line = _CONTROL.sub("", line)
-        tokens = line.split(" ")
-        result: list[str] = []
-        i = 0
-        while i < len(tokens):
-            if _is_hebrew_token(tokens[i]):
-                j = i
-                while j < len(tokens) and (_is_hebrew_token(tokens[j]) or tokens[j] == ""):
-                    j += 1
-                span = tokens[i:j]
-                span = [t[::-1] for t in span][::-1]  # reverse chars + token order
-                result.extend(span)
-                i = j
-            else:
-                result.append(tokens[i])
-                i += 1
-        out_lines.append(" ".join(result))
-    return "\n".join(out_lines)
+# German signals: umlauts/eszett, or a few high-frequency German function words. Used to
+# label documents and to detect the language of a query (so German Q&A is showcased).
+_GERMAN_CHARS = re.compile(r"[äöüßÄÖÜ]")
+_GERMAN_WORDS = re.compile(
+    r"\b(der|die|das|und|oder|für|von|mit|nicht|auf|dem|den|eine|einen|ist|sind|wird|"
+    r"werden|vertrag|kunde|kunden|rechnung|zahlung|kündigung|vereinbarung|dienst|"
+    r"über|gemäß|sowie)\b",
+    re.I,
+)
 
 
 def detect_language(text: str) -> str:
-    return "he" if _HEB.search(text) else "en"
+    """Best-effort language label: ``de`` for German, else ``en``. Deliberately light —
+    a couple of German function words or any umlaut is enough to tag German content."""
+    if not text:
+        return "en"
+    if _GERMAN_CHARS.search(text):
+        return "de"
+    if len(_GERMAN_WORDS.findall(text)) >= 2:
+        return "de"
+    return "en"
 
 
 @dataclass
@@ -78,7 +64,18 @@ class IngestedDoc:
     chunks: list[Chunk] = field(default_factory=list)
 
 
-def _window(text: str, size: int = 700, overlap: int = 120) -> list[str]:
+# Sentence boundary: end punctuation (Latin or after a clause number) followed by space
+# and a capital letter or quote. Keeps clauses and sentences intact across chunk edges.
+_SENT_SPLIT = re.compile(r'(?<=[.!?;:])\s+(?=[A-ZÄÖÜ0-9"“(])')
+
+# Enterprise-grade chunking target: large enough for coherent context, with meaningful
+# overlap so a fact split across a boundary is still recoverable. Sentence-respecting.
+_TARGET_CHARS = 900
+_OVERLAP_CHARS = 180
+
+
+def _hard_window(text: str, size: int, overlap: int) -> list[str]:
+    """Character window — only used to break a single pathologically long sentence."""
     text = text.strip()
     if len(text) <= size:
         return [text] if text else []
@@ -92,19 +89,58 @@ def _window(text: str, size: int = 700, overlap: int = 120) -> list[str]:
     return [c for c in out if c]
 
 
-def _page_texts(path: Path) -> list[tuple[str, bool]]:
-    """Return (text, needs_rtl_normalization) per page.
+def _semantic_chunks(text: str, target: int = _TARGET_CHARS,
+                     overlap: int = _OVERLAP_CHARS) -> list[str]:
+    """Structure-aware chunking: group whole sentences up to ``target`` chars, carrying a
+    trailing ~``overlap`` chars of sentences into the next chunk. Never splits mid-sentence
+    (except for a single over-long sentence, which is hard-windowed)."""
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= target:
+        return [text]
 
-    Prefers a clean ``<name>.txt`` sidecar (logical-order text layer, e.g. from a
-    Hebrew-aware parser) when present — those pages are already logical and must NOT
-    be re-normalized. Otherwise extracts from the PDF and flags pages for RTL repair.
-    """
+    units: list[str] = []
+    for sentence in _SENT_SPLIT.split(text):
+        s = sentence.strip()
+        if not s:
+            continue
+        if len(s) <= int(target * 1.5):
+            units.append(s)
+        else:
+            units.extend(_hard_window(s, target, overlap))
+
+    chunks: list[str] = []
+    cur: list[str] = []
+    cur_len = 0
+    for u in units:
+        if cur and cur_len + len(u) + 1 > target:
+            chunks.append(" ".join(cur).strip())
+            # carry trailing sentences (~overlap chars) into the next chunk for continuity
+            carry: list[str] = []
+            clen = 0
+            for prev in reversed(cur):
+                if clen + len(prev) > overlap:
+                    break
+                carry.insert(0, prev)
+                clen += len(prev) + 1
+            cur = carry
+            cur_len = sum(len(x) + 1 for x in cur)
+        cur.append(u)
+        cur_len += len(u) + 1
+    if cur:
+        chunks.append(" ".join(cur).strip())
+    return [c for c in chunks if c]
+
+
+def _page_texts(path: Path) -> list[str]:
+    """Return the extracted text per page. Prefers a clean ``<name>.txt`` sidecar (a
+    pre-extracted text layer) when present, otherwise extracts from the PDF directly."""
     sidecar = path.with_suffix(".txt")
     if sidecar.exists():
-        pages = sidecar.read_text("utf-8").split("\f")
-        return [(p, False) for p in pages]
+        return sidecar.read_text("utf-8").split("\f")
     reader = PdfReader(str(path))
-    return [((page.extract_text() or ""), True) for page in reader.pages]
+    return [(page.extract_text() or "") for page in reader.pages]
 
 
 def ingest_pdf(path: Path) -> IngestedDoc:
@@ -114,10 +150,9 @@ def ingest_pdf(path: Path) -> IngestedDoc:
     seq = 0
     doc_lang = "en"
 
-    for page_index, (raw, needs_norm) in enumerate(_page_texts(path), start=1):
-        text = normalize_rtl(raw) if needs_norm else raw
-        if _HEB.search(text):
-            doc_lang = "he"
+    for page_index, text in enumerate(_page_texts(path), start=1):
+        if detect_language(text) == "de":
+            doc_lang = "de"
 
         # split the page into (section, body) blocks using heading lines
         blocks: list[tuple[str, list[str]]] = [(current_section, [])]
@@ -135,7 +170,7 @@ def ingest_pdf(path: Path) -> IngestedDoc:
             body = " ".join(lines).strip()
             if not body:
                 continue
-            for piece in _window(body):
+            for piece in _semantic_chunks(body):
                 seq += 1
                 chunks.append(
                     Chunk(
