@@ -30,6 +30,15 @@ services:
       ABA_MODEL_SQL: ${ABA_MODEL_SQL:-claude-sonnet-4-6}
       ABA_VECTOR_BACKEND: ${ABA_VECTOR_BACKEND:-numpy}
       ABA_QDRANT_URL: http://qdrant:6333
+      # Local-model (Ollama) target. The UI "Local model" toggle / runtime.set_model_mode
+      # points the OpenAI-compatible client here. host.docker.internal reaches Ollama
+      # running on the host (see extra_hosts below); override either via .env.
+      ABA_LOCAL_BASE_URL: ${ABA_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
+      ABA_LOCAL_MODEL: ${ABA_LOCAL_MODEL:-qwen2.5:7b-instruct}
+    extra_hosts:
+      # Map host.docker.internal -> the host gateway so the container can reach
+      # a locally-running Ollama (compose doesn't add this automatically).
+      - "host.docker.internal:host-gateway"
     volumes:
       # Persist the embedding + LLM-response cache across restarts so the engine
       # warms up instantly (no re-embedding the corpus on every (re)start).
