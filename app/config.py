@@ -39,12 +39,17 @@ class Settings(BaseSettings):
     model_generation: str = "claude-opus-4-8"
     model_router: str = "claude-sonnet-4-6"
     model_sql: str = "claude-sonnet-4-6"
+    # Local model (Ollama or any OpenAI-compatible local server). Used when the runtime
+    # model mode is switched to "local" — no API key required for local endpoints.
+    local_base_url: str = "http://localhost:11434/v1"
+    local_model: str = "llama3.1"
     offline_mode: str = "auto"  # auto | always | never
     llm_max_tokens: int = 2000
     # Serve an identical prior request from cache instead of re-calling the LLM.
     # Makes repeated/warmed questions instant (great for demos). New questions still
-    # go live. Set false to always call the model.
-    cache_first: bool = True
+    # go live. Currently DISABLED so every question hits the model live (testing).
+    # Set ABA_CACHE_FIRST=true (or flip this default) to re-enable demo replay.
+    cache_first: bool = False
 
     # --- Embeddings --------------------------------------------------------
     # backend: "auto" (OpenAI embeddings when provider=openai on api.openai.com,

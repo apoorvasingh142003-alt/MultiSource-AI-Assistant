@@ -23,7 +23,7 @@ class Evidence(BaseModel):
     content: str                              # exact text/row handed to the LLM
     citation_label: str                       # "[ACME_MSA_2025.pdf p.4]" / "[invoices #1187]"
     score: Optional[float] = None             # retrieval / rerank score (documents)
-    language: Optional[str] = None            # "en" | "he"
+    language: Optional[str] = None            # "en" | "de"
     origin: Optional[str] = None              # "sample" | "uploaded" — provenance for trust
     contribution_percentage: Optional[float] = None  # fraction of answer this evidence contributed
     trust_factors: Optional[dict[str, Any]] = None   # recency_score, retrieval_score, etc.
@@ -166,6 +166,8 @@ class Trace(BaseModel):
     mode: str = "live"                                        # live | offline-cache | mixed
     generation_steps: list[GenerationStep] = Field(default_factory=list)
     multi_agent_trace: Optional[dict[str, Any]] = None
+    # Iterative LangGraph agent timeline (tool calls + observations), when agent_mode is on.
+    agent_trace: Optional[dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):
@@ -182,7 +184,11 @@ class AskRequest(BaseModel):
     agent_role: Optional[str] = None             # e.g. "You are a legal analyst..."
     output_format: Optional[str] = "auto"        # auto|prose|table|timeline_table|json|bullet_points|executive_summary
     multi_agent: bool = False                    # force multi-agent decomposition
+    agent_mode: bool = False                     # force the LangGraph iterative agent
+    temperature: Optional[float] = None          # generation temperature (None == deterministic)
     session_id: Optional[str] = None             # active chat session id
+    # Optional explicit prior turns; when omitted the server loads them from session_id.
+    conversation_history: Optional[list[dict[str, Any]]] = None
 
 
 class AskResponse(BaseModel):
@@ -196,6 +202,7 @@ class AskResponse(BaseModel):
     hallucination_risk_score: Optional[float] = None
     contradictions: list[dict[str, Any]] = Field(default_factory=list)
     multi_agent_trace: Optional[dict[str, Any]] = None
+    agent_trace: Optional[dict[str, Any]] = None
 
 
 class ExampleQuestion(BaseModel):

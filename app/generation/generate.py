@@ -160,6 +160,24 @@ def _evidence_block(evidence: list[Evidence]) -> str:
     return "\n\n".join(lines)
 
 
+def _build_user_message(question: str, evidence: list[Evidence],
+                        conversation_history: Optional[list[dict]] = None) -> str:
+    """Assemble the user message: optional conversation context (for reference
+    resolution only) + the current question + the grounded evidence block."""
+    from app.conversation import format_history_block
+    parts: list[str] = []
+    hist = format_history_block(conversation_history)
+    if hist:
+        parts.append(
+            "Conversation so far (use ONLY to resolve references like pronouns or "
+            "\"the second one\"; do NOT treat it as evidence — every fact must be "
+            "grounded in the Evidence block below):\n" + hist
+        )
+    parts.append(f"Question: {question}")
+    parts.append(f"Evidence:\n{_evidence_block(evidence)}")
+    return "\n\n".join(parts)
+
+
 def _humanize_doc(name: str) -> str:
     """A cleaner display name for a document — strips an upload timestamp/hash suffix
     and the extension, without inventing a title."""
@@ -226,7 +244,9 @@ def generate_answer(question: str, evidence: list[Evidence],
                     output_mode: str = "Standard Response",
                     custom_system_prompt: Optional[str] = None,
                     agent_role: Optional[str] = None,
-                    output_format: Optional[str] = "auto"):
+                    output_format: Optional[str] = "auto",
+                    temperature: Optional[float] = None,
+                    conversation_history: Optional[list[dict]] = None):
     s = get_settings()
     llm = get_llm()
     system_prompt = _get_system_prompt(
@@ -249,12 +269,12 @@ def generate_answer(question: str, evidence: list[Evidence],
         data = _keyword_answer(keyword_terms, evidence)
         return data["answer"], data["citations"], data["insufficient"], None
 
-    user = f"Question: {question}\n\nEvidence:\n{_evidence_block(evidence)}"
+    user = _build_user_message(question, evidence, conversation_history)
     data, call = llm.structured(
         purpose="generation", model=s.model_generation, system=system_prompt, user=user,
         schema=_ANSWER_SCHEMA,
         fallback=lambda: _extractive_fallback(question, evidence, keyword_terms),
-        max_tokens=1500,
+        max_tokens=1500, temperature=temperature,
     )
     answer = (data.get("answer", "") or "").replace("\\n", "\n").strip()
     return (
@@ -265,6 +285,56 @@ def generate_answer(question: str, evidence: list[Evidence],
     )
 
 
+def generate_answer_stream(question: str, evidence: list[Evidence],
+                           on_token, role: Optional[str] = None,
+                           output_mode: str = "Standard Response",
+                           custom_system_prompt: Optional[str] = None,
+                           agent_role: Optional[str] = None,
+                           output_format: Optional[str] = "auto",
+                           temperature: Optional[float] = None,
+                           conversation_history: Optional[list[dict]] = None):
+    """Streaming, prose-mode counterpart of ``generate_answer``.
+
+    Streams the grounded answer token-by-token via ``on_token(delta)`` and returns
+    ``(answer, citations, insufficient, call)``. Citations are recovered from the inline
+    ``[eN]`` markers in the streamed text, so the verification step downstream is identical
+    to the non-streaming path. Used only by ``/ask/stream``; ``/ask`` keeps JSON mode.
+    """
+    s = get_settings()
+    llm = get_llm()
+
+    if not evidence:
+        data = _extractive_fallback(question, evidence)
+        on_token(data["answer"])
+        return data["answer"], data["citations"], True, None
+
+    # keyword identification answers are deterministic — emit directly (no LLM variance)
+    # handled by the caller before streaming; here we always generate prose.
+    system_prompt = _get_system_prompt(
+        role, output_mode, custom_system_prompt=custom_system_prompt,
+        agent_role=agent_role, output_format=output_format,
+    )
+    # prose streaming: override the "Return JSON only." instruction
+    system_prompt = system_prompt.replace("Return JSON only.", "").rstrip() + (
+        "\n\nWrite the answer as well-structured prose (or the requested format). Cite "
+        "every factual claim inline with the evidence id(s), e.g. [e1] or [e2][e5]. Do "
+        "NOT output JSON or any wrapper object — just the answer text."
+    )
+    user = _build_user_message(question, evidence, conversation_history)
+
+    def _fallback() -> str:
+        return _extractive_fallback(question, evidence)["answer"]
+
+    answer, call = llm.stream_text(
+        purpose="generation_stream", model=s.model_generation, system=system_prompt,
+        user=user, on_token=on_token, fallback=_fallback, max_tokens=1500,
+        temperature=temperature,
+    )
+    answer = (answer or "").strip()
+    cited = sorted(set(re.findall(r"\[(e\d+)\]", answer)), key=lambda x: int(x[1:]))
+    return answer, cited, False, call
+
+
 def generate_general_knowledge(
     question: str,
     role: Optional[str] = None,
@@ -272,6 +342,7 @@ def generate_general_knowledge(
     custom_system_prompt: Optional[str] = None,
     agent_role: Optional[str] = None,
     output_format: Optional[str] = "auto",
+    temperature: Optional[float] = None,
 ) -> tuple[str, Optional[LLMCall]]:
     """Generate an answer from the LLM's general/parametric knowledge (no indexed
     evidence). Used when the router classifies a question as GENERAL_KNOWLEDGE —
@@ -331,7 +402,7 @@ def generate_general_knowledge(
             user=f"Question: {question}",
             schema=gk_schema,
             fallback=_fallback,
-            max_tokens=1500,
+            max_tokens=1500, temperature=temperature,
         )
         answer = (data.get("answer", "") or "").replace("\\n", "\n").strip()
         return answer, call

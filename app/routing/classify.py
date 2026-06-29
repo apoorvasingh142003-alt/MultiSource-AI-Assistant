@@ -10,14 +10,11 @@ evidence in any source — and whether it needs the agentic SQL→entities→doc
 """
 from __future__ import annotations
 
-import re
-
 from app.config import get_settings
+from app.ingestion.pdf import detect_language
 from app.llm.client import get_llm
 from app.models import RouteDecision
 from app.retrieval.intent import detect_intent
-
-_HEB = re.compile(r"[֐-׿]")
 
 _ROUTE_SCHEMA = {
     "type": "object",
@@ -63,7 +60,7 @@ _SYSTEM = (
     "customers are overdue AND what do their contracts say' → query DB for the customers, "
     "then retrieve only those customers' contracts). Provide a focused document_subquery "
     "(what to look up in the documents) and sql_subquery (what to ask the database). "
-    "Detect language(s) ('en','he').\n"
+    "Detect language(s) ('en','de').\n"
     "- GENERAL_KNOWLEDGE: the question is clearly answerable from general world knowledge "
     "(common facts, science, history, geography, etc.) but NONE of the uploaded sources "
     "contain the answer. Use this instead of NONE when the question IS answerable, just "
@@ -100,27 +97,30 @@ _SQL_KW = ["overdue", "invoice", "outstanding", "owe", "how many", "number of",
            "balance", "list all", "how much", "per customer"]
 _DOMAIN = ["contract", "invoice", "project", "customer", "agreement", "payment",
            "penalt", "suspension", "sla", "risk", "overdue"]
-_HEB_DOC = ["השע", "קנס", "סעיף", "ביטול", "סיכון", "שירות"]  # suspension/penalty/clause/risk
+# German contract/clause vocabulary — the German equivalents of the document signals
+# (suspension/penalty/clause/cancellation/risk/service/agreement).
+_DE_DOC = ["aussetzung", "kündigung", "vertragsstrafe", "strafe", "klausel", "risiko",
+           "dienst", "vereinbarung", "vertrag", "kündig", "sagt"]
 
 
 def rule_route(question: str) -> RouteDecision:
     q = question.lower()
-    langs = ["he"] if _HEB.search(question) else ["en"]
+    langs = ["de"] if detect_language(question) == "de" else ["en"]
     # A keyword document lookup ("find/which document contains X") is a PDF search even
     # when X is not a domain term — the deterministic layer must recognise it too, so the
     # offline path matches the live router instead of falling through to NONE.
     keyword_lookup = detect_intent(question).mode == "keyword"
     has_doc = (any(k in q for k in _DOC_KW) or any(k in q for k in _DOC_EVIDENCE_KW)
-               or any(k in question for k in _HEB_DOC) or keyword_lookup)
+               or any(k in q for k in _DE_DOC) or keyword_lookup)
     has_sql = any(k in q for k in _SQL_KW)
     # A document-evidence term (author/recipient/email/valuation/…) keeps the question
     # in-domain even with no contract vocabulary — an uploaded document could answer it.
     in_domain = (any(k in q for k in _DOMAIN) or any(k in q for k in _DOC_EVIDENCE_KW)
-                 or langs == ["he"])
+                 or langs == ["de"] or any(k in q for k in _DE_DOC))
 
     agentic = False
     if "overdue" in q and (any(k in q for k in ["suspension", "suspend", "agreement", "contract", "say"])
-                           or any(k in question for k in _HEB_DOC)):
+                           or any(k in q for k in _DE_DOC)):
         route, agentic = "HYBRID", True
     elif ("expir" in q or "expire" in q) and any(k in q for k in ["penalt", "clause", "terminat"]):
         route, agentic = "HYBRID", True
@@ -188,7 +188,8 @@ def _is_general_knowledge(question: str) -> bool:
         return False
 
 
-def classify(question: str, capability_brief: str):
+def classify(question: str, capability_brief: str, agent_role: str | None = None,
+             conversation_history: list[dict] | None = None):
     s = get_settings()
     llm = get_llm()
     fallback_decision = rule_route(question)
@@ -196,7 +197,19 @@ def classify(question: str, capability_brief: str):
     def _fallback() -> dict:
         return fallback_decision.model_dump()
 
-    user = f"Available sources:\n{capability_brief}\n\nQuestion: {question}"
+    # The agent's role can bias which source the router prefers (Section 2.1) — e.g. a
+    # "legal analyst" leans toward contract PDFs. It is a hint, not an override.
+    role_hint = (f"\n\nThe user is acting as: {agent_role}. If relevant, prefer the "
+                 f"source most useful to that role, but only when it can actually answer."
+                 if agent_role else "")
+    # Prior turns help route follow-ups ("what about the second one?") to the same
+    # source. Context only — routing stays deterministic (temperature 0).
+    from app.conversation import format_history_block
+    hist = format_history_block(conversation_history, max_chars=1500)
+    hist_block = (f"\n\nConversation so far (context for resolving the question):\n{hist}"
+                  if hist else "")
+    user = (f"Available sources:\n{capability_brief}{hist_block}\n\n"
+            f"Question: {question}{role_hint}")
     data, call = llm.structured(
         purpose="routing", model=s.model_router, system=_SYSTEM, user=user,
         schema=_ROUTE_SCHEMA, fallback=_fallback,

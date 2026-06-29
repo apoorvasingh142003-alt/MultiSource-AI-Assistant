@@ -150,6 +150,63 @@ function TrustItem({ e }: { e: Evidence }) {
   );
 }
 
+/* ---------- Citation Map (Section 6.2e) ---------- */
+function CitationMap({ answer, evidence }: { answer: string; evidence: Evidence[] }) {
+  const [active, setActive] = React.useState<string | null>(null);
+  const byId = React.useMemo(() => new Map(evidence.map((e) => [e.id, e])), [evidence]);
+  // Split the answer into text + clickable [eN] marker tokens.
+  const tokens = React.useMemo(() => answer.split(/(\[e\d+\])/g), [answer]);
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {/* left: answer with clickable citations */}
+      <div className="rounded-lg border border-slate-200 bg-white p-3 text-[12.5px] leading-relaxed text-slate-700">
+        {tokens.map((tok, i) => {
+          const m = tok.match(/^\[(e\d+)\]$/);
+          if (m && byId.has(m[1])) {
+            const id = m[1];
+            return (
+              <button
+                key={i}
+                onClick={() => setActive(id)}
+                className={cn(
+                  "mx-0.5 rounded px-1 text-[10px] font-bold ring-1 transition",
+                  active === id
+                    ? "bg-indigo-600 text-white ring-indigo-600"
+                    : "bg-indigo-50 text-indigo-600 ring-indigo-200 hover:bg-indigo-100"
+                )}
+              >
+                {id}
+              </button>
+            );
+          }
+          return <span key={i}>{tok}</span>;
+        })}
+      </div>
+      {/* right: evidence passages, highlighted on selection */}
+      <div className="space-y-2">
+        {evidence.map((e) => (
+          <div
+            key={e.id}
+            className={cn(
+              "rounded-lg border p-2.5 text-[11.5px] leading-relaxed transition",
+              active === e.id
+                ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-200"
+                : "border-slate-200 bg-slate-50/40"
+            )}
+          >
+            <div className="mb-1 flex items-center gap-1.5">
+              <span className="rounded bg-indigo-50 px-1 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-200">{e.id}</span>
+              <span className="truncate font-medium text-slate-500">{e.citation_label}</span>
+            </div>
+            <p className="line-clamp-4 text-slate-600">{e.content}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Main Panel ---------- */
 export default function ExplainabilityPanel({
   resp,
@@ -224,6 +281,16 @@ export default function ExplainabilityPanel({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Citation Map (Section 6.2e) */}
+      {usedEvidence.length > 0 && /\[e\d+\]/.test(resp.answer) && (
+        <div>
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Citation Map
+          </h4>
+          <CitationMap answer={resp.answer} evidence={usedEvidence} />
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import type {
   AppConfig, AskResponse, ExampleQuestion, IngestResult, Inventory,
-  Message, Session, SourceInfo, Workspace, WorkspaceArtifact, ProjectMemory,
-  Workflow,
+  Message, ModelModeStatus, Session, SourceInfo, Workspace, WorkspaceArtifact,
+  ProjectMemory, Workflow,
 } from "./types";
 
 // All API calls go through the UI's own origin at /api/*, which the Next server proxies
@@ -51,6 +51,15 @@ export async function fetchExamples(): Promise<ExampleQuestion[]> {
   return getJSON<ExampleQuestion[]>("/examples");
 }
 
+/* ---- runtime model mode (API vs local) ---- */
+export async function fetchModelMode(): Promise<ModelModeStatus> {
+  return getJSON<ModelModeStatus>("/runtime/model-mode");
+}
+
+export async function setModelMode(mode: "api" | "local"): Promise<ModelModeStatus> {
+  return postJSON<ModelModeStatus>("/runtime/model-mode", { mode });
+}
+
 export async function fetchSources(): Promise<SourceInfo[]> {
   return getJSON<SourceInfo[]>("/sources");
 }
@@ -59,39 +68,106 @@ export async function fetchInventory(): Promise<Inventory> {
   return getJSON<Inventory>("/inventory");
 }
 
-/* ---- ask (updated for Sections 2, 3, 5, 10) ---- */
+/* ---- ask ---- */
 export type AskScope = "workspace" | "demo" | "all";
 
-export async function ask(
-  question: string,
-  scope: AskScope = "workspace",
-  role?: string | null,
-  outputMode: string = "Standard Response",
-  opts?: {
-    custom_system_prompt?: string | null;
-    agent_role?: string | null;
-    output_format?: string;
-    multi_agent?: boolean;
-    session_id?: string | null;
-  },
-): Promise<AskResponse> {
+/** Everything the engine needs for one turn. Built once from the settings store. */
+export interface AskOptions {
+  scope?: AskScope;
+  role?: string | null;
+  output_mode?: string;
+  custom_system_prompt?: string | null;
+  agent_role?: string | null;
+  output_format?: string;
+  multi_agent?: boolean;
+  agent_mode?: boolean;
+  temperature?: number | null;
+  session_id?: string | null;
+  conversation_history?: { role: string; content: string }[] | null;
+}
+
+function askBody(question: string, o: AskOptions): Record<string, unknown> {
+  return {
+    question,
+    scope: o.scope ?? "workspace",
+    output_mode: o.output_mode ?? "Standard Response",
+    ...(o.role ? { role: o.role } : {}),
+    ...(o.custom_system_prompt ? { custom_system_prompt: o.custom_system_prompt } : {}),
+    ...(o.agent_role ? { agent_role: o.agent_role } : {}),
+    ...(o.output_format && o.output_format !== "auto" ? { output_format: o.output_format } : {}),
+    ...(o.multi_agent ? { multi_agent: true } : {}),
+    ...(o.agent_mode ? { agent_mode: true } : {}),
+    ...(o.temperature != null ? { temperature: o.temperature } : {}),
+    ...(o.session_id ? { session_id: o.session_id } : {}),
+    ...(o.conversation_history ? { conversation_history: o.conversation_history } : {}),
+  };
+}
+
+export async function ask(question: string, opts: AskOptions = {}): Promise<AskResponse> {
   const res = await fetch(`${apiBase()}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      question,
-      scope,
-      output_mode: outputMode,
-      ...(role ? { role } : {}),
-      ...(opts?.custom_system_prompt ? { custom_system_prompt: opts.custom_system_prompt } : {}),
-      ...(opts?.agent_role ? { agent_role: opts.agent_role } : {}),
-      ...(opts?.output_format && opts.output_format !== "auto" ? { output_format: opts.output_format } : {}),
-      ...(opts?.multi_agent ? { multi_agent: true } : {}),
-      ...(opts?.session_id ? { session_id: opts.session_id } : {}),
-    }),
+    body: JSON.stringify(askBody(question, opts)),
   });
   if (!res.ok) throw new Error(`ask → ${res.status}`);
   return res.json();
+}
+
+export interface AgentStep { iteration: number; tool: string; args: Record<string, unknown> }
+export interface AgentObservation { tool: string | null; summary: string }
+
+export interface StreamHandlers {
+  onDelta?: (text: string) => void;
+  onRoute?: (route: string | null) => void;
+  onAgentStep?: (step: AgentStep) => void;
+  onAgentObservation?: (obs: AgentObservation) => void;
+  onDone: (resp: AskResponse) => void;
+  onError?: (msg: string) => void;
+}
+
+/* ---- streaming ask (SSE) ---- */
+export async function askStream(
+  question: string,
+  opts: AskOptions,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${apiBase()}/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(askBody(question, opts)),
+    signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`ask/stream → ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  // Parse SSE frames separated by a blank line.
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let event = "message";
+      let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      const payload = JSON.parse(data);
+      if (event === "delta") handlers.onDelta?.(payload.text ?? "");
+      else if (event === "route") handlers.onRoute?.(payload.route ?? null);
+      else if (event === "agent_step") handlers.onAgentStep?.(payload as AgentStep);
+      else if (event === "agent_observation") handlers.onAgentObservation?.(payload as AgentObservation);
+      else if (event === "done") handlers.onDone(payload as AskResponse);
+      else if (event === "error") handlers.onError?.(payload.message ?? "stream error");
+    }
+  }
 }
 
 /* ---- ingestion ---- */
@@ -145,6 +221,36 @@ export async function deleteSession(sessionId: string): Promise<void> {
 
 export async function renameSession(sessionId: string, title: string): Promise<Session> {
   return patchJSON<Session>(`/sessions/${sessionId}`, { title });
+}
+
+/* ---- message-level edit / delete / regenerate ---- */
+export async function editMessage(
+  sessionId: string, messageId: string, content: string,
+): Promise<Message> {
+  return patchJSON<Message>(`/sessions/${sessionId}/messages/${messageId}`, { content });
+}
+
+export async function deleteMessage(sessionId: string, messageId: string): Promise<void> {
+  return deleteJSON(`/sessions/${sessionId}/messages/${messageId}`);
+}
+
+export async function regenerateMessage(
+  sessionId: string, messageId: string, opts: Partial<AskOptions> = {},
+): Promise<AskResponse> {
+  return postJSON<AskResponse>(
+    `/sessions/${sessionId}/messages/${messageId}/regenerate`,
+    {
+      scope: opts.scope ?? "workspace",
+      output_mode: opts.output_mode ?? "Standard Response",
+      ...(opts.role ? { role: opts.role } : {}),
+      ...(opts.custom_system_prompt ? { custom_system_prompt: opts.custom_system_prompt } : {}),
+      ...(opts.agent_role ? { agent_role: opts.agent_role } : {}),
+      ...(opts.output_format && opts.output_format !== "auto" ? { output_format: opts.output_format } : {}),
+      ...(opts.multi_agent ? { multi_agent: true } : {}),
+      ...(opts.agent_mode ? { agent_mode: true } : {}),
+      ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+    },
+  );
 }
 
 /* ---- workspaces (Section 7) ---- */

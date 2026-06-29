@@ -8,7 +8,10 @@ import logging
 import time
 from typing import Optional
 
-from app.generation.generate import generate_answer, generate_general_knowledge
+from app.generation.analysis import (attach_trust_factors, compute_contributions,
+                                     compute_hallucination_risk, detect_contradictions)
+from app.generation.generate import (generate_answer, generate_answer_stream,
+                                     generate_general_knowledge)
 from app.generation.verify import verify_citations
 from app.models import (AskResponse, Evidence, GenerationStep, LLMCall, RouteDecision,
                         StageTiming, Trace)
@@ -38,7 +41,10 @@ class Orchestrator:
             output_mode: str = "Standard Response",
             custom_system_prompt: Optional[str] = None,
             agent_role: Optional[str] = None,
-            output_format: Optional[str] = "auto") -> AskResponse:
+            output_format: Optional[str] = "auto",
+            temperature: Optional[float] = None,
+            conversation_history: Optional[list[dict]] = None,
+            on_token=None) -> AskResponse:
         t0 = time.perf_counter()
         trace = Trace(question=question)
         evidence: list[Evidence] = []
@@ -50,9 +56,10 @@ class Orchestrator:
         trace.role_instructions = role_obj.system_instruction if role_obj.name != "default" else None
         trace.output_mode = output_mode
 
-        # 1) ROUTE
+        # 1) ROUTE (agent_role can bias source preference — Section 2.1)
         ts = time.perf_counter()
-        decision, route_call = classify(question, self.capability_brief)
+        decision, route_call = classify(question, self.capability_brief, agent_role=agent_role,
+                                        conversation_history=conversation_history)
         calls.append(route_call)
         trace.route = decision
         trace.languages = decision.languages
@@ -68,6 +75,7 @@ class Orchestrator:
         ))
 
         # 2) RETRIEVE per route
+        ts_ret = time.perf_counter()
         if decision.route == "SQL":
             evidence += self._sql_branch(
                 trace, calls, decision.sql_subquery or question, "sql_main", allowed_tables
@@ -110,6 +118,30 @@ class Orchestrator:
                 evidence += sn_ev
                 safety_net_fired = True
 
+        # 2c) Retrieval / SQL steps for the explainability flowchart (Section 6.1)
+        for strace in trace.sql_executions:
+            trace.generation_steps.append(GenerationStep(
+                step="sql_generation",
+                decision="valid" if strace.valid else "invalid",
+                duration_ms=strace.duration_ms,
+                details={
+                    "sql": strace.validated_sql or strace.generated_sql,
+                    "rows_returned": strace.row_count,
+                    "purpose": strace.purpose,
+                },
+            ))
+        if trace.document_retrieval is not None:
+            dr = trace.document_retrieval
+            trace.generation_steps.append(GenerationStep(
+                step="document_retrieval",
+                duration_ms=_ms(ts_ret),
+                details={
+                    "candidates": len(dr.candidates),
+                    "after_rerank": len([c for c in dr.candidates if c.selected]),
+                    "intent": dr.intent,
+                },
+            ))
+
         # 3) Re-label evidence e1..eN (single source of truth for citations)
         for i, e in enumerate(evidence, start=1):
             e.id = f"e{i}"
@@ -130,11 +162,23 @@ class Orchestrator:
         if (not safety_net_fired and dr and dr.intent == "keyword" and dr.search_terms
                 and is_document_lookup(question)):
             kw_terms = dr.search_terms
-        answer, cited, insufficient, gen_call = generate_answer(
-            question, evidence, keyword_terms=kw_terms, role=role, output_mode=output_mode,
-            custom_system_prompt=custom_system_prompt, agent_role=agent_role,
-            output_format=output_format,
-        )
+        # Stream the grounded answer token-by-token when a sink is provided AND this is a
+        # real LLM generation (not the deterministic keyword-identification answer).
+        stream_gen = on_token is not None and evidence and not kw_terms
+        if stream_gen:
+            answer, cited, insufficient, gen_call = generate_answer_stream(
+                question, evidence, on_token=on_token, role=role, output_mode=output_mode,
+                custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                output_format=output_format, temperature=temperature,
+                conversation_history=conversation_history,
+            )
+        else:
+            answer, cited, insufficient, gen_call = generate_answer(
+                question, evidence, keyword_terms=kw_terms, role=role, output_mode=output_mode,
+                custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                output_format=output_format, temperature=temperature,
+                conversation_history=conversation_history,
+            )
         if not evidence:
             # Nothing was retrieved — give an honest, specific account of what was
             # searched and why no answer could be grounded (never fabricate).
@@ -144,8 +188,10 @@ class Orchestrator:
                     question, role=role, output_mode=output_mode,
                     custom_system_prompt=custom_system_prompt,
                     agent_role=agent_role,
-                    output_format=output_format,
+                    output_format=output_format, temperature=temperature,
                 )
+                if on_token and answer:
+                    on_token(answer)
                 if gen_call:
                     calls.append(gen_call)
                 # Create synthetic evidence
@@ -181,6 +227,15 @@ class Orchestrator:
                     note="General knowledge answer — no indexed citations to verify."
                 )
                 trace.citation_check = check
+                # Explainability/verification for the parametric answer (Sections 6.1/8.1)
+                synthetic_ev.used = True
+                synthetic_ev.contribution_percentage = 100.0
+                attach_trust_factors(evidence, None, [])
+                trace.generation_steps.append(GenerationStep(
+                    step="verification", decision="parametric", duration_ms=0.0,
+                    details={"verified": 0, "unverified": 0, "contradictions": 0,
+                             "note": "No indexed citations to verify."},
+                ))
                 trace.llm_calls = calls
                 trace.cost = summarize(calls)
                 trace.mode = _mode(calls)
@@ -188,6 +243,8 @@ class Orchestrator:
                 return AskResponse(
                     question=question, answer=answer, insufficient=False,
                     citations=evidence, trace=trace,
+                    # parametric answers carry inherent unverifiable risk (no grounding)
+                    hallucination_risk_score=0.3,
                 )
             else:
                 answer = self._no_evidence_answer(decision, trace)
@@ -202,7 +259,13 @@ class Orchestrator:
             "grounded": True,
             "insufficient": insufficient,
         }
+        trace.generation_steps.append(GenerationStep(
+            step="generation", decision="grounded", duration_ms=_ms(ts),
+            details={"evidence_items": len(evidence),
+                     "model": gen_call.model if gen_call else "deterministic"},
+        ))
 
+        ts_v = time.perf_counter()
         check = verify_citations(answer, cited, evidence)
         trace.citation_check = check
         # mark which evidence the final answer actually used (answer-supported)
@@ -212,11 +275,40 @@ class Orchestrator:
         if not check.verified and evidence:
             trace.notes.append(f"Citation check: {check.note}")
 
+        # 4b) EXPLAINABILITY + VERIFICATION analysis (Sections 6.1 & 8.1)
+        compute_contributions(answer, evidence)
+        attach_trust_factors(evidence, trace.document_retrieval, trace.sql_executions)
+        contradictions, verification_warning, pairs_eval = detect_contradictions(
+            answer, evidence, calls
+        )
+        hallucination_risk = compute_hallucination_risk(check, contradictions, pairs_eval)
+        if verification_warning and not insufficient:
+            answer = answer.rstrip() + (
+                "\n\n⚠️ Note: Some sources contain conflicting information. "
+                "See the Explainability panel for details."
+            )
+        trace.generation_steps.append(GenerationStep(
+            step="verification",
+            decision="verified" if check.verified else "issues",
+            duration_ms=_ms(ts_v),
+            details={
+                "verified": len(check.cited_ids) - len(check.unknown_ids),
+                "unverified": len(check.unknown_ids),
+                "contradictions": len(contradictions),
+                "hallucination_risk": hallucination_risk,
+            },
+        ))
+
         # 5) finalize
         trace.llm_calls = calls
         trace.cost = summarize(calls)
         trace.mode = _mode(calls)
         trace.timings.append(StageTiming(name="total", duration_ms=_ms(t0)))
+
+        # Non-streamed terminal answers (deterministic keyword lookup, insufficient-
+        # evidence, or any post-stream edit) are delivered once to the live sink.
+        if on_token and not stream_gen and answer:
+            on_token(answer)
 
         cited_set = set(check.cited_ids)
         citations = [e for e in evidence if e.id in cited_set] or (
@@ -225,6 +317,9 @@ class Orchestrator:
         return AskResponse(
             question=question, answer=answer, insufficient=insufficient,
             citations=citations, trace=trace,
+            verification_warning=verification_warning,
+            hallucination_risk_score=hallucination_risk,
+            contradictions=contradictions,
         )
 
     def _no_evidence_answer(self, decision: RouteDecision, trace: Trace) -> str:

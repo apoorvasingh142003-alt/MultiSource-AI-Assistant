@@ -98,26 +98,36 @@ class LLMClient:
             pass
 
     @staticmethod
-    def _key(purpose: str, model: str, system: str, user: str) -> str:
+    def _key(purpose: str, model: str, system: str, user: str,
+             temperature: Optional[float] = None) -> str:
         h = hashlib.sha256()
-        h.update(f"{purpose}\x00{model}\x00{system}\x00{user}".encode("utf-8"))
+        payload = f"{purpose}\x00{model}\x00{system}\x00{user}"
+        # Only fold temperature into the cache key when it is a non-zero override, so the
+        # large existing temperature-0 cache (scripted demos) keeps replaying identically.
+        if temperature:
+            payload += f"\x00t={temperature}"
+        h.update(payload.encode("utf-8"))
         return h.hexdigest()
 
     # -- public API --------------------------------------------------------
     def structured(self, *, purpose, model, system, user, schema,
-                   fallback=None, max_tokens=None) -> tuple[dict[str, Any], LLMCall]:
+                   fallback=None, max_tokens=None,
+                   temperature=None) -> tuple[dict[str, Any], LLMCall]:
         return self._run(purpose=purpose, model=model, system=system, user=user,
-                         schema=schema, fallback=fallback, max_tokens=max_tokens)
+                         schema=schema, fallback=fallback, max_tokens=max_tokens,
+                         temperature=temperature)
 
     def text(self, *, purpose, model, system, user,
-             fallback=None, max_tokens=None) -> tuple[str, LLMCall]:
+             fallback=None, max_tokens=None, temperature=None) -> tuple[str, LLMCall]:
         data, call = self._run(purpose=purpose, model=model, system=system, user=user,
-                               schema=None, fallback=fallback, max_tokens=max_tokens)
+                               schema=None, fallback=fallback, max_tokens=max_tokens,
+                               temperature=temperature)
         return (data if isinstance(data, str) else data.get("text", "")), call
 
     # -- core --------------------------------------------------------------
-    def _run(self, *, purpose, model, system, user, schema, fallback, max_tokens):
-        key = self._key(purpose, model, system, user)
+    def _run(self, *, purpose, model, system, user, schema, fallback, max_tokens,
+             temperature=None):
+        key = self._key(purpose, model, system, user, temperature)
         t0 = time.perf_counter()
 
         # cache-first: replay an identical prior call instantly (snappy demos).
@@ -129,7 +139,8 @@ class LLMClient:
 
         if self.s.use_live_llm and self._live_client() is not None:
             try:
-                result, usage = self._dispatch(model, system, user, schema, max_tokens)
+                result, usage = self._dispatch(model, system, user, schema, max_tokens,
+                                               temperature)
                 self._cache[key] = result
                 self._save_cache()
                 from app.pricing import call_cost
@@ -158,18 +169,123 @@ class LLMClient:
             f"No live LLM, no cache, and no fallback for purpose={purpose!r}."
         )
 
-    def _dispatch(self, model, system, user, schema, max_tokens):
+    # -- streaming ---------------------------------------------------------
+    def stream_text(self, *, purpose, model, system, user, on_token,
+                    fallback=None, max_tokens=None, temperature=None) -> tuple[str, LLMCall]:
+        """Stream a plain-text completion token-by-token via ``on_token(delta)``.
+
+        Returns ``(full_text, LLMCall)``. Cached/offline paths still stream (the stored
+        or fallback text is chunked through ``on_token``) so the UX is identical with no
+        key. Live streaming uses the provider's native streaming API.
+        """
+        key = self._key(purpose, model, system, user, temperature)
+        t0 = time.perf_counter()
+
+        def _emit_chunks(text: str) -> None:
+            # chunk cached/offline text into small pieces for a smooth typing effect
+            for i in range(0, len(text), 24):
+                on_token(text[i:i + 24])
+
+        if self.s.cache_first and key in self._cache:
+            cached = self._cache[key]
+            text = cached if isinstance(cached, str) else cached.get("text", "")
+            _emit_chunks(text)
+            return text, LLMCall(purpose=purpose, model=model, mode="cached",
+                                 duration_ms=round((time.perf_counter() - t0) * 1000, 1))
+
+        if self.s.use_live_llm and self._live_client() is not None:
+            try:
+                text, usage = self._stream_dispatch(model, system, user, max_tokens,
+                                                     temperature, on_token)
+                self._cache[key] = text
+                self._save_cache()
+                from app.pricing import call_cost
+                return text, LLMCall(
+                    purpose=purpose, model=model, mode="live",
+                    input_tokens=usage[0], output_tokens=usage[1],
+                    cost_usd=call_cost(model, usage[0], usage[1]),
+                    duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+                )
+            except Exception as exc:
+                self._last_error = str(exc)
+
+        if key in self._cache:
+            cached = self._cache[key]
+            text = cached if isinstance(cached, str) else cached.get("text", "")
+            _emit_chunks(text)
+            return text, LLMCall(purpose=purpose, model=model, mode="cached",
+                                 duration_ms=round((time.perf_counter() - t0) * 1000, 1))
+
+        if fallback is not None:
+            text = fallback()
+            text = text if isinstance(text, str) else str(text)
+            _emit_chunks(text)
+            return text, LLMCall(purpose=purpose, model=model, mode="stub",
+                                 duration_ms=round((time.perf_counter() - t0) * 1000, 1))
+
+        raise RuntimeError(f"No live LLM, no cache, and no fallback for purpose={purpose!r}.")
+
+    def _stream_dispatch(self, model, system, user, max_tokens, temperature, on_token):
         if self.s.llm_provider == "openai":
-            return self._call_openai(model, system, user, schema, max_tokens)
-        return self._call_anthropic(model, system, user, schema, max_tokens)
+            return self._stream_openai(model, system, user, max_tokens, temperature, on_token)
+        return self._stream_anthropic(model, system, user, max_tokens, temperature, on_token)
+
+    def _stream_openai(self, model, system, user, max_tokens, temperature, on_token):
+        stream = self.openai_client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            max_tokens=max_tokens or self.s.llm_max_tokens,
+            temperature=temperature if temperature is not None else 0,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        parts: list[str] = []
+        usage = (None, None)
+        for chunk in stream:
+            if getattr(chunk, "usage", None):
+                usage = (getattr(chunk.usage, "prompt_tokens", None),
+                         getattr(chunk.usage, "completion_tokens", None))
+            for choice in (chunk.choices or []):
+                delta = getattr(choice.delta, "content", None)
+                if delta:
+                    parts.append(delta)
+                    on_token(delta)
+        return "".join(parts), usage
+
+    def _stream_anthropic(self, model, system, user, max_tokens, temperature, on_token):
+        parts: list[str] = []
+        usage = (None, None)
+        with self.anthropic_client.messages.stream(
+            model=model,
+            max_tokens=max_tokens or self.s.llm_max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            temperature=temperature if temperature is not None else 0,
+        ) as stream:
+            for text in stream.text_stream:
+                if text:
+                    parts.append(text)
+                    on_token(text)
+            final = stream.get_final_message()
+            usage = (getattr(final.usage, "input_tokens", None),
+                     getattr(final.usage, "output_tokens", None))
+        return "".join(parts), usage
+
+    def _dispatch(self, model, system, user, schema, max_tokens, temperature=None):
+        if self.s.llm_provider == "openai":
+            return self._call_openai(model, system, user, schema, max_tokens, temperature)
+        return self._call_anthropic(model, system, user, schema, max_tokens, temperature)
 
     # -- anthropic ---------------------------------------------------------
-    def _call_anthropic(self, model, system, user, schema, max_tokens):
+    def _call_anthropic(self, model, system, user, schema, max_tokens, temperature=None):
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens or self.s.llm_max_tokens,
             "system": system,
             "messages": [{"role": "user", "content": user}],
+            # Anthropic's Messages API supports temperature; default to deterministic.
+            "temperature": temperature if temperature is not None else 0,
         }
         if schema is not None:
             kwargs["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
@@ -180,7 +296,7 @@ class LLMClient:
         return (json.loads(text) if schema is not None else text), usage
 
     # -- openai-compatible (OpenAI / Groq / Gemini / Ollama / …) ------------
-    def _call_openai(self, model, system, user, schema, max_tokens):
+    def _call_openai(self, model, system, user, schema, max_tokens, temperature=None):
         sys = system
         if schema is not None:
             sys = (system + "\n\nRespond with a SINGLE JSON object conforming to this "
@@ -191,7 +307,9 @@ class LLMClient:
             "messages": [{"role": "system", "content": sys},
                          {"role": "user", "content": user}],
             "max_tokens": max_tokens or self.s.llm_max_tokens,
-            "temperature": 0,  # deterministic routing / SQL / grounded generation
+            # default 0 (deterministic routing / SQL / grounded generation); callers may
+            # raise it for final generation only.
+            "temperature": temperature if temperature is not None else 0,
         }
         resp = None
         if schema is not None:

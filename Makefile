@@ -3,7 +3,7 @@ VENV := .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: help setup seed api ui eval docker clean
+.PHONY: help setup seed api ui eval docker local clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -25,6 +25,9 @@ eval: ## Run the routing/retrieval eval across all demo questions
 
 docker: ## Build and run everything with docker compose
 	docker compose up --build
+
+local: ## Run the whole app on a local Ollama model (starts Ollama, pulls model, switches to local mode)
+	./scripts/local-model.sh
 
 clean: ## Remove caches and generated artifacts
 	rm -rf data/cache __pycache__ app/__pycache__ ui/.next

@@ -12,3 +12,10 @@ rank-bm25>=0.2.2
 sqlglot>=23.0
 numpy>=1.26
 python-dotenv>=1.0
+
+# Agentic chat — LangGraph iterative agent (import-guarded; the classic pipeline
+# runs without these, so they're effectively optional for the offline path).
+langgraph>=0.2,<0.3
+langchain-core>=0.3,<0.4
+langchain-openai>=0.2,<0.3
+langgraph-checkpoint-sqlite

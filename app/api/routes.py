@@ -2,22 +2,28 @@
 ingestion, sessions, workspaces, memory, workflows."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app import runtime
+from app.artifacts import generate_artifact_core
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
 from app.models import (AskRequest, AskResponse, ExampleQuestion, IngestResult,
                         Inventory, RouteDecision, SourceInfo, Trace)
 from app.roles import list_roles
+from app.workflow import execute_workflow
 
 router = APIRouter()
 log = logging.getLogger("aba.api")
@@ -63,7 +69,25 @@ def config() -> dict:
             if eng.document_source.index.reranker else "disabled"
         ),
         "has_api_key": s.has_api_key,
+        "model_mode": runtime.get_mode(),
+        "cache_first": s.cache_first,
     }
+
+
+@router.get("/runtime/model-mode")
+def get_model_mode() -> dict:
+    return runtime.status()
+
+
+class ModelModeUpdate(BaseModel):
+    mode: str   # "api" | "local"
+
+
+@router.post("/runtime/model-mode")
+def set_model_mode(body: ModelModeUpdate) -> dict:
+    mode = body.mode if body.mode in ("api", "local") else "api"
+    runtime.set_model_mode(mode)
+    return runtime.status()
 
 
 @router.get("/examples", response_model=list[ExampleQuestion])
@@ -100,12 +124,16 @@ def ask(req: AskRequest) -> AskResponse:
     if not question:
         raise HTTPException(400, "Please enter a question.")
     try:
-        return get_engine().ask(
+        resp = get_engine().ask(
             question, scope=req.scope, role=req.role, output_mode=req.output_mode,
             custom_system_prompt=req.custom_system_prompt,
             agent_role=req.agent_role,
             output_format=req.output_format,
             session_id=req.session_id,
+            multi_agent=req.multi_agent,
+            agent_mode=req.agent_mode,
+            temperature=req.temperature,
+            conversation_history=req.conversation_history,
         )
     except Exception:  # never leak a stack trace — fail gracefully and honestly
         log.exception("ask() failed for question=%r", question)
@@ -122,6 +150,108 @@ def ask(req: AskRequest) -> AskResponse:
                 mode="error",
             ),
         )
+
+    # Persist the turn to chat history (Section 5.1). Best-effort: a persistence
+    # failure must never break answering.
+    if req.session_id:
+        try:
+            route = resp.trace.route.route if resp.trace.route else None
+            confidence = resp.trace.route.confidence if resp.trace.route else None
+            save_message(req.session_id, "user", question)
+            save_message(req.session_id, "assistant", resp.answer, route, confidence)
+        except Exception:
+            log.exception("failed to persist chat turn for session=%s", req.session_id)
+    return resp
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/ask/stream")
+async def ask_stream(req: AskRequest) -> StreamingResponse:
+    """Server-Sent Events variant of /ask. The answer is streamed token-by-token as the
+    model generates it (real time-to-first-token); the complete payload (trace, citations,
+    verification) follows in a final ``done`` event. Agent-mode tool steps are emitted as
+    additive ``agent_step`` / ``agent_observation`` events."""
+    question = (req.question or "").strip()
+    if not question:
+        raise HTTPException(400, "Please enter a question.")
+
+    async def gen():
+        yield _sse("status", {"stage": "processing"})
+        loop = asyncio.get_running_loop()
+        aq: asyncio.Queue = asyncio.Queue()
+        DONE = object()
+        holder: dict = {}
+
+        def on_token(text: str) -> None:
+            if text:
+                loop.call_soon_threadsafe(aq.put_nowait, ("delta", {"text": text}))
+
+        def on_event(event: str, data: dict) -> None:
+            loop.call_soon_threadsafe(aq.put_nowait, (event, data))
+
+        def worker():
+            try:
+                holder["resp"] = get_engine().ask(
+                    question, scope=req.scope, role=req.role, output_mode=req.output_mode,
+                    custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
+                    output_format=req.output_format, session_id=req.session_id,
+                    multi_agent=req.multi_agent, agent_mode=req.agent_mode,
+                    temperature=req.temperature,
+                    conversation_history=req.conversation_history,
+                    on_token=on_token, on_event=on_event,
+                )
+            except Exception as exc:  # noqa: BLE001
+                holder["error"] = exc
+                log.exception("ask_stream worker failed for question=%r", question)
+            finally:
+                loop.call_soon_threadsafe(aq.put_nowait, (DONE, None))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        streamed = False
+        while True:
+            kind, payload = await aq.get()
+            if kind is DONE:
+                break
+            if kind == "delta":
+                streamed = True
+            yield _sse(kind, payload)
+
+        resp = holder.get("resp")
+        if resp is None:
+            yield _sse("error", {"message": "Engine error while processing the question."})
+            return
+
+        if req.session_id:
+            try:
+                route = resp.trace.route.route if resp.trace.route else None
+                conf = resp.trace.route.confidence if resp.trace.route else None
+                save_message(req.session_id, "user", question)
+                save_message(req.session_id, "assistant", resp.answer, route, conf)
+            except Exception:
+                log.exception("stream persist failed for session=%s", req.session_id)
+
+        yield _sse("route", {"route": resp.trace.route.route if resp.trace.route else None})
+        # Fallback: paths that don't stream (multi-agent synthesis, deterministic offline)
+        # still deliver the answer progressively so the UI never sits blank.
+        if not streamed:
+            words = (resp.answer or "").split(" ")
+            buf = ""
+            for i, w in enumerate(words):
+                buf += w + " "
+                if i % 4 == 3:
+                    yield _sse("delta", {"text": buf})
+                    buf = ""
+                    await asyncio.sleep(0.015)
+            if buf:
+                yield _sse("delta", {"text": buf})
+        yield _sse("done", json.loads(resp.model_dump_json()))
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # -- ingestion ---------------------------------------------------------------
@@ -205,7 +335,7 @@ def list_sessions() -> list[dict]:
         db.close()
 
 
-@router.post("/sessions")
+@router.post("/sessions", status_code=201)
 def create_session() -> dict:
     sid = str(uuid.uuid4())
     db = get_session_db()
@@ -223,8 +353,8 @@ def get_session_messages(session_id: str) -> list[dict]:
     db = get_session_db()
     try:
         rows = db.execute(
-            "SELECT id, session_id, role, content, route, confidence, created_at "
-            "FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+            "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
+            "FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC",
             (session_id,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -269,6 +399,9 @@ def save_message(
     """Auto-save a message to the session (called after /ask)."""
     db = get_session_db()
     try:
+        # Ensure the session row exists (API clients may pass a session_id without
+        # having created it first; the UI creates it via POST /sessions).
+        db.execute("INSERT OR IGNORE INTO sessions (id) VALUES (?)", (session_id,))
         mid = str(uuid.uuid4())
         db.execute(
             "INSERT INTO messages (id, session_id, role, content, route, confidence) "
@@ -286,6 +419,128 @@ def save_message(
         db.commit()
     finally:
         db.close()
+
+
+class MessageEdit(BaseModel):
+    content: str
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}")
+def edit_message(session_id: str, message_id: str, body: MessageEdit) -> dict:
+    """Edit a message's content in place (records edited_at)."""
+    db = get_session_db()
+    try:
+        cur = db.execute(
+            "UPDATE messages SET content = ?, edited_at = datetime('now') "
+            "WHERE id = ? AND session_id = ?",
+            (body.content, message_id, session_id),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Message not found")
+        row = db.execute(
+            "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
+            "FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        return dict(row)
+    finally:
+        db.close()
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+def delete_message(session_id: str, message_id: str) -> dict:
+    """Delete a single message from a session."""
+    db = get_session_db()
+    try:
+        cur = db.execute(
+            "DELETE FROM messages WHERE id = ? AND session_id = ?",
+            (message_id, session_id),
+        )
+        db.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Message not found")
+        return {"ok": True}
+    finally:
+        db.close()
+
+
+class RegenerateRequest(BaseModel):
+    # Generation settings to reuse for the new answer; the question + session come from
+    # the stored turn so the client doesn't have to resend them.
+    scope: str = "workspace"
+    role: str | None = None
+    output_mode: str = "Standard Response"
+    custom_system_prompt: str | None = None
+    agent_role: str | None = None
+    output_format: str | None = "auto"
+    multi_agent: bool = False
+    agent_mode: bool = False
+    temperature: float | None = None
+
+
+@router.post("/sessions/{session_id}/messages/{message_id}/regenerate",
+             response_model=AskResponse)
+def regenerate_message(session_id: str, message_id: str,
+                       body: RegenerateRequest = Body(default=RegenerateRequest())) -> AskResponse:
+    """Re-answer the user turn that produced assistant message ``message_id``.
+
+    Loads conversation context up to (and including) the preceding user question,
+    re-runs the engine, overwrites the assistant message, and returns the new answer.
+    """
+    db = get_session_db()
+    try:
+        target = db.execute(
+            "SELECT id, role, created_at, rowid FROM messages WHERE id = ? AND session_id = ?",
+            (message_id, session_id),
+        ).fetchone()
+        if not target:
+            raise HTTPException(404, "Message not found")
+        if target["role"] != "assistant":
+            raise HTTPException(400, "Regenerate targets an assistant message.")
+        # the user question this assistant turn answered = latest user msg before it
+        user_msg = db.execute(
+            "SELECT id, content, created_at, rowid FROM messages "
+            "WHERE session_id = ? AND role = 'user' AND rowid < ? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (session_id, target["rowid"]),
+        ).fetchone()
+        if not user_msg:
+            raise HTTPException(400, "No preceding user question to regenerate from.")
+        question = user_msg["content"]
+        # context = everything strictly before that user question (rowid = insertion order)
+        hist_rows = db.execute(
+            "SELECT role, content FROM messages WHERE session_id = ? AND rowid < ? "
+            "ORDER BY rowid ASC",
+            (session_id, user_msg["rowid"]),
+        ).fetchall()
+        history = [{"role": r["role"], "content": r["content"]} for r in hist_rows]
+    finally:
+        db.close()
+
+    resp = get_engine().ask(
+        question, scope=body.scope, role=body.role, output_mode=body.output_mode,
+        custom_system_prompt=body.custom_system_prompt, agent_role=body.agent_role,
+        output_format=body.output_format, session_id=session_id,
+        multi_agent=body.multi_agent, agent_mode=body.agent_mode,
+        temperature=body.temperature, conversation_history=history,
+    )
+
+    # overwrite the assistant message in place (keeps thread position + id)
+    db = get_session_db()
+    try:
+        route = resp.trace.route.route if resp.trace.route else None
+        conf = resp.trace.route.confidence if resp.trace.route else None
+        db.execute(
+            "UPDATE messages SET content = ?, route = ?, confidence = ?, "
+            "edited_at = datetime('now') WHERE id = ?",
+            (resp.answer, route, conf, message_id),
+        )
+        db.commit()
+    except Exception:
+        log.exception("failed to persist regenerated message %s", message_id)
+    finally:
+        db.close()
+    return resp
 
 
 # ==============================================================================
@@ -311,7 +566,7 @@ class WorkspaceCreate(BaseModel):
     description: str = ""
 
 
-@router.post("/workspaces")
+@router.post("/workspaces", status_code=201)
 def create_workspace(body: WorkspaceCreate) -> dict:
     wid = str(uuid.uuid4())
     db = get_session_db()
@@ -375,35 +630,13 @@ class ArtifactGenerate(BaseModel):
     title: str
 
 
-@router.post("/workspaces/{workspace_id}/generate")
+@router.post("/workspaces/{workspace_id}/generate", status_code=201)
 def generate_artifact(workspace_id: str, body: ArtifactGenerate) -> dict:
-    # Run the full pipeline with appropriate output_format
-    format_map = {
-        "report": "prose", "ppt_content": "bullet_points", "table": "table",
-        "json": "json", "summary": "executive_summary", "action_plan": "bullet_points",
-    }
-    output_format = format_map.get(body.artifact_type, "auto")
-    try:
-        resp = get_engine().ask(
-            body.question, scope="all", output_format=output_format,
-        )
-        content = resp.answer
-    except Exception:
-        content = "Error generating artifact. Please try again."
-
-    aid = str(uuid.uuid4())
-    db = get_session_db()
-    try:
-        db.execute(
-            "INSERT INTO workspace_artifacts (id, workspace_id, artifact_type, title, content, source_question) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (aid, workspace_id, body.artifact_type, body.title, content, body.question),
-        )
-        db.commit()
-        row = db.execute("SELECT * FROM workspace_artifacts WHERE id = ?", (aid,)).fetchone()
-        return dict(row)
-    finally:
-        db.close()
+    # Runs the full pipeline with the right output_format + per-type directive +
+    # injected workspace memory, and persists the artifact (Sections 7.1 & 9.1).
+    return generate_artifact_core(
+        workspace_id, body.question, body.artifact_type, body.title
+    )
 
 
 @router.delete("/workspaces/{workspace_id}/artifacts/{artifact_id}")
@@ -443,7 +676,7 @@ class MemoryCreate(BaseModel):
     value: str
 
 
-@router.post("/workspaces/{workspace_id}/memory")
+@router.post("/workspaces/{workspace_id}/memory", status_code=201)
 def add_memory(workspace_id: str, body: MemoryCreate) -> dict:
     mid = str(uuid.uuid4())
     db = get_session_db()
@@ -503,7 +736,7 @@ def list_workflows(workspace_id: str) -> list[dict]:
         db.close()
 
 
-@router.post("/workspaces/{workspace_id}/workflows")
+@router.post("/workspaces/{workspace_id}/workflows", status_code=201)
 def create_workflow(workspace_id: str, body: WorkflowCreate) -> dict:
     wid = str(uuid.uuid4())
     db = get_session_db()
@@ -525,46 +758,7 @@ def create_workflow(workspace_id: str, body: WorkflowCreate) -> dict:
 
 @router.post("/workspaces/{workspace_id}/workflows/{workflow_id}/run")
 def run_workflow(workspace_id: str, workflow_id: str) -> dict:
-    db = get_session_db()
-    try:
-        row = db.execute(
-            "SELECT * FROM workflows WHERE id = ? AND workspace_id = ?",
-            (workflow_id, workspace_id)
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "Workflow not found")
-        steps = json.loads(row["steps"])
-        db.execute(
-            "UPDATE workflows SET status = 'running', last_run = datetime('now') WHERE id = ?",
-            (workflow_id,)
-        )
-        db.commit()
-    finally:
-        db.close()
-
-    # Execute steps sequentially (simple synchronous implementation)
-    try:
-        for step in steps:
-            q = step.get("question", "")
-            at = step.get("artifact_type", "summary")
-            out = step.get("output_to", "Result")
-            generate_artifact(
-                workspace_id,
-                ArtifactGenerate(question=q, artifact_type=at, title=out),
-            )
-        db2 = get_session_db()
-        try:
-            db2.execute("UPDATE workflows SET status = 'idle' WHERE id = ?", (workflow_id,))
-            db2.commit()
-        finally:
-            db2.close()
-    except Exception as e:
-        db3 = get_session_db()
-        try:
-            db3.execute("UPDATE workflows SET status = 'error' WHERE id = ?", (workflow_id,))
-            db3.commit()
-        finally:
-            db3.close()
-        log.exception("Workflow %s failed", workflow_id)
-
-    return {"ok": True, "message": f"Workflow executed with {len(steps)} step(s)"}
+    result = execute_workflow(workspace_id, workflow_id)
+    if not result.get("ok") and result.get("error") == "Workflow not found":
+        raise HTTPException(404, "Workflow not found")
+    return result

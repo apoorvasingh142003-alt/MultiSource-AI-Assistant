@@ -75,14 +75,35 @@ def _db_path() -> Path:
     return get_settings().data_path / "sessions.db"
 
 
+_initialized = False
+
+
 def get_session_db() -> sqlite3.Connection:
-    """Get a connection to the sessions/workspaces database."""
+    """Get a connection to the sessions/workspaces database.
+
+    Lazily ensures the schema exists on first use, so the session/workspace endpoints
+    work even if the FastAPI ``startup`` hook hasn't run (e.g. under a bare TestClient
+    or a serverless cold start). Idempotent and cheap after the first call.
+    """
+    global _initialized
     path = _db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    if not _initialized:
+        conn.executescript(_SESSIONS_SCHEMA)
+        # additive column migrations (safe/idempotent)
+        for table, col, decl in (("messages", "edited_at", "TEXT"),):
+            try:
+                cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except Exception:
+                pass
+        conn.commit()
+        _initialized = True
     return conn
 
 

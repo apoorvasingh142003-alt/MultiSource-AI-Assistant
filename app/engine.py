@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import get_settings
+from app.multi_agent import is_multipart
 from app.ingestion.pdf import ingest_pdf, ingest_pdf_dir
 from app.ingestion.sqlite_introspect import SchemaInfo, introspect
 from app.ingestion.sqlite_register import copy_seed, merge_sqlite
@@ -53,9 +54,9 @@ EXAMPLES = [
         question="Show all active projects and summarize the risks in their documentation.",
         why="SQL lists active projects; project briefs supply the risk narrative, grouped per project."),
     ExampleQuestion(
-        label="Hebrew", route="PDF", language="he",
-        question="מה אומר ההסכם של תבור מערכות על השעיית שירות וקנסות?",
-        why="Bilingual retrieval over a Hebrew contract with right-to-left citations."),
+        label="German", route="PDF", language="de",
+        question="Was sagt der Vertrag über die Aussetzung des Dienstes und Vertragsstrafen?",
+        why="Multilingual retrieval over a German contract — cross-lingual embeddings + Unicode BM25."),
     ExampleQuestion(
         label="Honest grounding", route="NONE", language="en",
         question="What is our employee headcount in Berlin?",
@@ -233,21 +234,70 @@ class Engine:
         agent_role: Optional[str] = None,
         output_format: Optional[str] = "auto",
         session_id: Optional[str] = None,
+        multi_agent: bool = False,
+        agent_mode: bool = False,
+        temperature: Optional[float] = None,
+        conversation_history: Optional[list[dict]] = None,
+        on_token=None,
+        on_event=None,
     ):
         with self._lock:
             allowed_docs, allowed_tables = self._scope_sources(scope)
             if scope == "workspace" and not allowed_docs and not allowed_tables:
                 return self._empty_workspace_response(question)
-            resp = self.orchestrator.ask(
-                question,
-                allowed_docs=allowed_docs,
-                allowed_tables=allowed_tables,
-                role=role,
-                output_mode=output_mode,
-                custom_system_prompt=custom_system_prompt,
-                agent_role=agent_role,
-                output_format=output_format,
-            )
+
+            # Conversation memory: load prior turns for the session so follow-up
+            # questions resolve references. Caller may pass history explicitly.
+            if conversation_history is None and session_id:
+                from app.conversation import load_history
+                conversation_history = load_history(session_id)
+
+            # Agent mode (Section: LangGraph iterative agent): the model loops over
+            # tools (SQL / document retrieval), then we rebuild the standard Trace so
+            # every inspector/explainability panel still lights up. Falls back to the
+            # classic path when unavailable (offline / no key / import missing).
+            if agent_mode:
+                try:
+                    from app.agent.runner import run_agent, agent_available
+                    available = agent_available()
+                except Exception:
+                    available = False
+                if available:
+                    resp = run_agent(
+                        self.orchestrator, question,
+                        allowed_docs=allowed_docs, allowed_tables=allowed_tables,
+                        role=role, output_mode=output_mode,
+                        custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                        output_format=output_format, temperature=temperature,
+                        conversation_history=conversation_history, on_token=on_token,
+                        on_event=on_event,
+                    )
+                    self._stamp_origin(resp.trace.evidence)
+                    return resp
+
+            # Multi-agent decomposition (Section 10): triggered explicitly or by a
+            # multi-part heuristic. Runs the full pipeline per sub-question, then synthesizes.
+            if multi_agent or is_multipart(question):
+                from app.multi_agent import run_multi_agent
+                resp = run_multi_agent(
+                    self.orchestrator, question, allowed_docs, allowed_tables,
+                    role, output_mode, custom_system_prompt, agent_role, output_format,
+                    temperature, conversation_history,
+                )
+            else:
+                resp = self.orchestrator.ask(
+                    question,
+                    allowed_docs=allowed_docs,
+                    allowed_tables=allowed_tables,
+                    role=role,
+                    output_mode=output_mode,
+                    custom_system_prompt=custom_system_prompt,
+                    agent_role=agent_role,
+                    output_format=output_format,
+                    temperature=temperature,
+                    conversation_history=conversation_history,
+                    on_token=on_token,
+                )
             self._stamp_origin(resp.trace.evidence)
             return resp
 

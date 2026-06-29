@@ -15,7 +15,7 @@ export default function AnswerPanel({
 }: { resp: AskResponse; onOpenInspector?: () => void }) {
   const t = resp.trace;
   const { highlight, onCite } = useCiteHighlight();
-  const rtlAnswer = isRTL(resp.answer) || t.languages.includes("he");
+  const rtlAnswer = isRTL(resp.answer);
   const docSel = t.document_retrieval?.candidates.filter((c) => c.selected).length ?? 0;
   const sqlRows = t.sql_executions.filter((s) => s.purpose !== "entity_link").reduce((a, s) => a + s.row_count, 0);
   const retrievalSummary = [
@@ -30,6 +30,13 @@ export default function AnswerPanel({
   const [showExplain, setShowExplain] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const isGK = t.route?.route === "GENERAL_KNOWLEDGE";
+
+  // Ctrl+E (dispatched from the page) toggles the explainability panel.
+  React.useEffect(() => {
+    const toggle = () => setShowExplain((v) => !v);
+    window.addEventListener("aba:toggle-explain", toggle);
+    return () => window.removeEventListener("aba:toggle-explain", toggle);
+  }, []);
 
   // Parse answer segments for table detection
   const segments = segmentAnswer(resp.answer);
@@ -136,6 +143,31 @@ export default function AnswerPanel({
       {/* Multi-agent trace */}
       {resp.multi_agent_trace && (
         <MultiAgentTrace trace={resp.multi_agent_trace} />
+      )}
+
+      {/* Agent (iterative) timeline */}
+      {resp.agent_trace && resp.agent_trace.steps?.length > 0 && (
+        <Card className="p-4">
+          <SectionTitle hint={`${resp.agent_trace.iterations} round(s) · ${resp.agent_trace.tools_used.join(", ")}`}>
+            Agent reasoning
+          </SectionTitle>
+          <div className="space-y-2">
+            {resp.agent_trace.steps.map((s, i) => (
+              <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                <div className="flex items-center gap-2 text-[12px]">
+                  <Pill tone="indigo">step {s.iteration}</Pill>
+                  <span className="font-mono text-[11px] text-indigo-600">{s.tool}</span>
+                  {typeof (s.args as any)?.query === "string" && (
+                    <span className="truncate text-slate-500">“{String((s.args as any).query)}”</span>
+                  )}
+                </div>
+                {s.observation && (
+                  <p className="mt-1.5 whitespace-pre-wrap text-[11.5px] leading-relaxed text-slate-500">{s.observation}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {/* supporting evidence — only the passages/rows the answer is grounded in */}
