@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app import runtime
 from app.artifacts import generate_artifact_core
 from app.config import get_settings
 from app.db.migrations import get_session_db
@@ -68,7 +69,25 @@ def config() -> dict:
             if eng.document_source.index.reranker else "disabled"
         ),
         "has_api_key": s.has_api_key,
+        "model_mode": runtime.get_mode(),
+        "cache_first": s.cache_first,
     }
+
+
+@router.get("/runtime/model-mode")
+def get_model_mode() -> dict:
+    return runtime.status()
+
+
+class ModelModeUpdate(BaseModel):
+    mode: str   # "api" | "local"
+
+
+@router.post("/runtime/model-mode")
+def set_model_mode(body: ModelModeUpdate) -> dict:
+    mode = body.mode if body.mode in ("api", "local") else "api"
+    runtime.set_model_mode(mode)
+    return runtime.status()
 
 
 @router.get("/examples", response_model=list[ExampleQuestion])

@@ -1,6 +1,8 @@
 "use client";
 import React from "react";
 import { Button, Icons, cn } from "./ui";
+import { fetchModelMode, setModelMode } from "@/lib/api";
+import type { ModelModeStatus } from "@/lib/types";
 import {
   AiSettingsState, OUTPUT_OPTIONS, PRESET_ROLES,
 } from "./AiSettingsPanel";
@@ -110,15 +112,9 @@ export default function SettingsPanel({
             <Toggle label="Dark mode" hint="Switch the interface theme" checked={dark} onChange={onToggleDark} />
           </Section>
 
-          {/* Model & keys — deferred */}
-          <Section title="Model & API keys" hint="coming soon">
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-3.5 text-[12.5px] leading-relaxed text-slate-400">
-              <div className="mb-1 flex items-center gap-1.5 font-medium text-slate-500">
-                <Icons.shield className="h-3.5 w-3.5" /> API key management & local model switch
-              </div>
-              Paste your own API key, or point at a local model (Ollama) — landing in a future update.
-              The app currently uses the server-configured provider.
-            </div>
+          {/* Model source — API vs local */}
+          <Section title="Model source">
+            <ModelModeToggle />
           </Section>
 
           <div className="flex justify-end">
@@ -126,6 +122,54 @@ export default function SettingsPanel({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ModelModeToggle() {
+  const [status, setStatus] = React.useState<ModelModeStatus | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => { fetchModelMode().then(setStatus).catch(() => {}); }, []);
+
+  const choose = async (mode: "api" | "local") => {
+    if (busy || status?.mode === mode) return;
+    setBusy(true); setErr(null);
+    try { setStatus(await setModelMode(mode)); }
+    catch { setErr("Could not switch model source."); }
+    finally { setBusy(false); }
+  };
+
+  const Opt = ({ mode, title, sub }: { mode: "api" | "local"; title: string; sub: string }) => {
+    const active = status?.mode === mode;
+    return (
+      <button onClick={() => choose(mode)} disabled={busy}
+        className={cn("flex-1 rounded-xl border px-3.5 py-3 text-left transition disabled:opacity-60",
+          active ? "border-indigo-300 bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "border-slate-200 bg-white hover:border-indigo-200")}>
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-semibold text-slate-800">{title}</span>
+          {active && <span className="h-2 w-2 rounded-full bg-indigo-500" />}
+        </div>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{sub}</p>
+      </button>
+    );
+  };
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <Opt mode="api" title="API" sub="Server-configured provider (cloud)" />
+        <Opt mode="local" title="Local model" sub="Ollama / local server — no key needed" />
+      </div>
+      {status && (
+        <p className="mt-2 text-[11px] text-slate-400">
+          Active: <span className="font-medium text-slate-600">{status.model}</span>
+          {" · "}{status.provider}{status.live ? "" : " · offline"}
+          {status.mode === "local" && <> · expects Ollama at <span className="font-mono">{status.base_url}</span></>}
+        </p>
+      )}
+      {err && <p className="mt-1.5 text-[11px] text-rose-500">{err}</p>}
     </div>
   );
 }

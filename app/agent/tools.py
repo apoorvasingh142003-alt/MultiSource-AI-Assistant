@@ -94,13 +94,17 @@ def make_tools(ctx: AgentRunContext) -> list[StructuredTool]:
         if not ev:
             obs = "No relevant passages found in the documents for that query."
         else:
-            passages = "\n".join(
-                f"[{i}] {e.citation_label} {e.content[:300]}" for i, e in zip(ids, ev)
+            # Give the model the FULL passage text — truncating here makes the agent miss
+            # facts (e.g. a medication list) that appear later in a retrieved chunk.
+            passages = "\n\n".join(
+                f"[{i}] {e.citation_label}\n{e.content}" for i, e in zip(ids, ev)
             )
             obs = f"Found {len(ev)} passage(s):\n{passages}"
         ctx.steps.append({
             "iteration": len(ctx.steps) + 1, "tool": "search_documents",
-            "args": {"query": query}, "observation": obs[:600],
+            "args": {"query": query},
+            # the UI step shows a short preview; the model received the full obs above
+            "observation": (obs[:600] + "…") if len(obs) > 600 else obs,
             "evidence_ids": ids,
         })
         return obs

@@ -235,6 +235,17 @@ export interface AppConfig {
   vector_backend: string;
   reranker_backend: string;
   has_api_key: boolean;
+  model_mode?: "api" | "local";
+  cache_first?: boolean;
+}
+
+export interface ModelModeStatus {
+  mode: "api" | "local";
+  provider: string;
+  model: string;
+  base_url: string;
+  local_model: string;
+  live: boolean;
 }
 
 /* ---------------- ingestion & inventory ---------------- */

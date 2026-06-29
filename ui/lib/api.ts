@@ -1,7 +1,7 @@
 import type {
   AppConfig, AskResponse, ExampleQuestion, IngestResult, Inventory,
-  Message, Session, SourceInfo, Workspace, WorkspaceArtifact, ProjectMemory,
-  Workflow,
+  Message, ModelModeStatus, Session, SourceInfo, Workspace, WorkspaceArtifact,
+  ProjectMemory, Workflow,
 } from "./types";
 
 // All API calls go through the UI's own origin at /api/*, which the Next server proxies
@@ -49,6 +49,15 @@ export async function fetchConfig(): Promise<AppConfig> {
 
 export async function fetchExamples(): Promise<ExampleQuestion[]> {
   return getJSON<ExampleQuestion[]>("/examples");
+}
+
+/* ---- runtime model mode (API vs local) ---- */
+export async function fetchModelMode(): Promise<ModelModeStatus> {
+  return getJSON<ModelModeStatus>("/runtime/model-mode");
+}
+
+export async function setModelMode(mode: "api" | "local"): Promise<ModelModeStatus> {
+  return postJSON<ModelModeStatus>("/runtime/model-mode", { mode });
 }
 
 export async function fetchSources(): Promise<SourceInfo[]> {
