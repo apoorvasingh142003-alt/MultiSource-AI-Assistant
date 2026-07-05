@@ -1,5 +1,6 @@
 "use client";
 import { signIn, signOut, useSession } from "next-auth/react";
+import TelegramConnect from "@/components/TelegramConnect";
 
 // When auth is disabled (dev/single-tenant) this is a passthrough. When enabled, it gates
 // the whole app behind Google sign-in and shows a compact signed-in chip with sign-out.
@@ -57,9 +58,10 @@ function Gate({ children }: { children: React.ReactNode }) {
             {(user?.name || user?.email || "?").slice(0, 1).toUpperCase()}
           </div>
         )}
-        <span className="text-xs text-slate-600 dark:text-slate-300 max-w-[10rem] truncate">
+        <span className="text-xs text-slate-600 dark:text-slate-300 max-w-[9rem] truncate">
           {user?.email}
         </span>
+        <TelegramConnect />
         <button
           onClick={() => signOut()}
           className="text-xs font-medium text-slate-500 hover:text-rose-600 px-1"
