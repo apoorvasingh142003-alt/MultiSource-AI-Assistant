@@ -157,8 +157,8 @@ def roles() -> list[dict]:
 
 
 @router.get("/inventory", response_model=Inventory)
-def inventory() -> Inventory:
-    return get_engine().inventory()
+def inventory(user: CurrentUser) -> Inventory:
+    return get_engine(user.id).inventory()
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -168,7 +168,7 @@ def ask(req: AskRequest, user: CurrentUser) -> AskResponse:
         raise HTTPException(400, "Please enter a question.")
     _guard_session_access(req.session_id, user.id)
     try:
-        resp = get_engine().ask(
+        resp = get_engine(user.id).ask(
             question, scope=req.scope, role=req.role, output_mode=req.output_mode,
             custom_system_prompt=req.custom_system_prompt,
             agent_role=req.agent_role,
@@ -239,7 +239,7 @@ async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
 
         def worker():
             try:
-                holder["resp"] = get_engine().ask(
+                holder["resp"] = get_engine(user.id).ask(
                     question, scope=req.scope, role=req.role, output_mode=req.output_mode,
                     custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
                     output_format=req.output_format, session_id=req.session_id,
@@ -302,9 +302,9 @@ async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
 # -- ingestion ---------------------------------------------------------------
 
 @router.post("/ingest/pdf", response_model=IngestResult)
-async def ingest_pdf_endpoint(files: list[UploadFile] = File(...)) -> IngestResult:
-    eng = get_engine()
-    dest_dir = get_settings().data_path / "uploads" / "pdfs"
+async def ingest_pdf_endpoint(user: CurrentUser, files: list[UploadFile] = File(...)) -> IngestResult:
+    eng = get_engine(user.id)
+    dest_dir = eng.uploads_dir / "pdfs"
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for i, f in enumerate(files):
@@ -330,9 +330,9 @@ async def ingest_pdf_endpoint(files: list[UploadFile] = File(...)) -> IngestResu
 
 
 @router.post("/ingest/sqlite", response_model=IngestResult)
-async def ingest_sqlite_endpoint(files: list[UploadFile] = File(...)) -> IngestResult:
-    eng = get_engine()
-    dest_dir = get_settings().data_path / "uploads" / "db"
+async def ingest_sqlite_endpoint(user: CurrentUser, files: list[UploadFile] = File(...)) -> IngestResult:
+    eng = get_engine(user.id)
+    dest_dir = eng.uploads_dir / "db"
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for i, f in enumerate(files):
@@ -356,8 +356,8 @@ async def ingest_sqlite_endpoint(files: list[UploadFile] = File(...)) -> IngestR
 
 
 @router.post("/reset", response_model=Inventory)
-def reset() -> Inventory:
-    eng = get_engine()
+def reset(user: CurrentUser) -> Inventory:
+    eng = get_engine(user.id)
     eng.reset()
     return eng.inventory()
 

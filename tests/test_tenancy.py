@@ -51,6 +51,8 @@ def client(tmp_path, monkeypatch):
     c = TestClient(app)
     yield c
     app.dependency_overrides.clear()
+    from app.engine import _engine_for
+    _engine_for.cache_clear()  # don't leak per-user engines built during the test
 
 
 def _as(uid: str) -> None:
@@ -118,6 +120,41 @@ def test_auth_disabled_yields_default_user(monkeypatch):
     monkeypatch.setattr(auth, "get_settings", lambda: _S())
     user = get_current_user(authorization=None)   # no token needed
     assert user.id == "default"
+
+
+def test_engines_are_isolated_per_user():
+    from app.engine import get_engine, _engine_for
+    from app.models import IngestedDocumentInfo
+    _engine_for.cache_clear()
+    a, b = get_engine("alice"), get_engine("bob")
+    assert a is not b                       # distinct per-tenant engines
+    assert a is get_engine("alice")         # cached per user
+    assert a.uploads_dir != b.uploads_dir   # per-user upload dirs
+    assert "alice" in str(a.uploads_dir) and "bob" in str(b.uploads_dir)
+
+    # A document in alice's inventory/index must never appear for bob…
+    a._documents.append(IngestedDocumentInfo(name="alice-secret.pdf", origin="uploaded"))
+    assert "alice-secret.pdf" in {d.name for d in a.inventory().documents}
+    assert "alice-secret.pdf" not in {d.name for d in b.inventory().documents}
+    # …but the shared sample corpus is visible to both tenants.
+    assert any(d.origin == "sample" for d in b.inventory().documents)
+    _engine_for.cache_clear()
+
+
+def test_inventory_endpoint_is_per_tenant(client):
+    from app.engine import get_engine
+    from app.models import IngestedDocumentInfo
+
+    _as("alice")
+    get_engine("alice")._documents.append(
+        IngestedDocumentInfo(name="alice-upload.pdf", origin="uploaded"))
+    inv_a = client.get("/inventory").json()
+    assert any(d["name"] == "alice-upload.pdf" for d in inv_a["documents"])
+
+    _as("bob")
+    inv_b = client.get("/inventory").json()
+    assert all(d["name"] != "alice-upload.pdf" for d in inv_b["documents"])   # isolated
+    assert any(d["origin"] == "sample" for d in inv_b["documents"])           # demo shared
 
 
 def test_jwt_rejects_tampering():
