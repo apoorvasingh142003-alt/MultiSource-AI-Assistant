@@ -84,5 +84,25 @@ services:
       - ui
     restart: unless-stopped
 
+  # PERMANENT public URL — Cloudflare *Named Tunnel* (token-based).
+  #   Brings the app up at a stable hostname (e.g. https://assistant.lazysnail.xyz)
+  #   that is live whenever this stack is running. Unlike the quick `tunnel` above,
+  #   the URL never changes. DNS is auto-managed by Cloudflare for that subdomain,
+  #   so nothing at the zone apex (the existing quiz site) is touched.
+  #
+  # One-time setup (see scripts/tunnel.sh header for the click-by-click):
+  #   1. Cloudflare Zero Trust → Networks → Tunnels → Create tunnel (Cloudflared) → copy the token.
+  #   2. In that tunnel's Public Hostname tab: subdomain=assistant, domain=lazysnail.xyz,
+  #      service = HTTP → ui:3000  (cloudflared reaches the UI over this compose network).
+  #   3. Put the token in .env as CLOUDFLARE_TUNNEL_TOKEN=...
+  # Run:  ./scripts/tunnel.sh   (or: docker compose --profile named-tunnel up -d named-tunnel)
+  named-tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["named-tunnel"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - ui
+    restart: unless-stopped
+
 volumes:
   aba_cache:
