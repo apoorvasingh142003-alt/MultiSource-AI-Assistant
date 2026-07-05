@@ -1,9 +1,10 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-// Google sign-in (open signup). We request the Sheets read-only scope up-front so the
-// same consent lets the assistant read a user's sheets later (Increment 4), and keep the
-// Google access/refresh tokens in the NextAuth JWT for that use.
+// Google sign-in (open signup). Only basic, NON-sensitive scopes at login (openid/email/
+// profile) so the app needs no Google sensitive-scope verification to publish. The Sheets
+// read-only scope is requested later via INCREMENTAL authorization, only when a user
+// connects a sheet (Increment 4) — keeping sign-in frictionless and easy to verify.
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -11,10 +12,7 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
       authorization: {
         params: {
-          scope:
-            "openid email profile https://www.googleapis.com/auth/spreadsheets.readonly",
-          access_type: "offline",
-          prompt: "consent",
+          scope: "openid email profile",
         },
       },
     }),
