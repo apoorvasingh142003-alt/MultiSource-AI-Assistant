@@ -41,6 +41,12 @@ export function EvidenceItem({ e, highlight, compact, showUsed }: {
   e: Evidence; highlight: boolean; compact?: boolean; showUsed?: boolean;
 }) {
   const rtl = isRTL(e.content);
+  const bodyRef = React.useRef<HTMLParagraphElement>(null);
+  const [clipped, setClipped] = React.useState(false);
+  React.useEffect(() => {
+    const el = bodyRef.current;
+    if (el) setClipped(el.scrollHeight > el.clientHeight + 2);
+  }, [e.content, compact]);
   // Evidence is never truncated — full text is always shown (scrollable when long) so
   // citations can be verified in full. `compact` only caps the visible height.
   return (
@@ -58,11 +64,17 @@ export function EvidenceItem({ e, highlight, compact, showUsed }: {
         {showUsed && e.used && <Pill tone="emerald"><Icons.check className="h-3 w-3" />used in answer</Pill>}
         {e.score != null && <span className="ml-auto font-mono text-[10px] text-slate-400">score {e.score.toFixed(3)}</span>}
       </div>
-      <p dir={rtl ? "rtl" : "ltr"}
+      <p ref={bodyRef} dir={rtl ? "rtl" : "ltr"}
         className={cn("scroll-thin overflow-y-auto whitespace-pre-wrap text-[12.5px] leading-relaxed text-slate-600",
           rtl && "text-right", compact ? "max-h-44" : "")}>
         {e.content}
       </p>
+      {compact && clipped && (
+        <p className="mt-1 flex items-center gap-1 text-[10.5px] font-medium text-slate-400">
+          <Icons.chevron className="h-3 w-3 rotate-90" />
+          scroll for full text
+        </p>
+      )}
     </div>
   );
 }
@@ -114,6 +126,12 @@ export function SqlBlock({ s }: { s: SqlExecutionTrace }) {
             </tbody>
           </table>
         </div>
+      )}
+      {s.rows.length > 12 && (
+        <p className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-amber-700">
+          <Icons.alert className="h-3 w-3" />
+          +{s.rows.length - 12} more row(s) (truncated in view) — open the full trace to see all {s.row_count}.
+        </p>
       )}
     </div>
   );

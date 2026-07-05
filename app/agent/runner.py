@@ -15,7 +15,7 @@ from typing import Optional
 from app.config import get_settings
 from app.generation.analysis import (attach_trust_factors, compute_contributions,
                                      compute_hallucination_risk, detect_contradictions)
-from app.generation.generate import _get_system_prompt
+from app.generation.generate import _get_system_prompt, generate_answer
 from app.generation.verify import verify_citations
 from app.models import (AskResponse, GenerationStep, LLMCall, RouteDecision, StageTiming,
                         Trace)
@@ -149,18 +149,54 @@ def run_agent(orch, question: str,
     except Exception as exc:  # recursion limit hit or transient agent failure
         log.warning("agent run ended early: %s", exc)
 
-    if not final_answer:
-        final_answer = ("I could not complete the agent reasoning for this question. "
-                        "Please try rephrasing it.") if not ctx.evidence else (
-            "Based on the gathered evidence, I was unable to compose a final answer.")
+    # ---- GROUNDING-FIRST for the agent path -------------------------------------------
+    # A weak local agent frequently (a) answers with NO tool call, inventing facts from
+    # parametric knowledge, or (b) writes an uncited free-form answer that drifts from what
+    # the tools returned. Enforce the same guarantee as the classic path: never present an
+    # ungrounded or uncited answer as fact. See docs/grounding-first-fix.md (agent mode).
+    if not ctx.evidence:
+        # The agent gathered nothing — do NOT trust its parametric answer. Fall back to the
+        # classic grounding-first orchestrator, which retrieves and either grounds the answer
+        # or honestly declines / gives clearly-disclaimed guidance. This is what fixes the
+        # "Who is the nurse?" → GENERAL_KNOWLEDGE fabrication in agent mode.
+        log.info("agent produced no grounded evidence — falling back to classic grounding-first path")
+        resp = orch.ask(
+            question, allowed_docs=allowed_docs, allowed_tables=allowed_tables,
+            role=role, output_mode=output_mode, custom_system_prompt=custom_system_prompt,
+            agent_role=agent_role, output_format=output_format, temperature=temperature,
+            conversation_history=conversation_history, on_token=on_token,
+        )
+        resp.trace.notes.insert(
+            0, "Agent mode gathered no evidence with its tools; answered via the classic "
+               "grounding-first pipeline instead (retrieve → ground or decline)."
+        )
+        return resp
 
-    # stream the final answer to the live sink (chunked — the loop produced it whole)
+    # The agent DID gather evidence across its tool steps. Produce the FINAL answer with the
+    # reliable grounded generator over everything it collected — this enforces inline [eN]
+    # citations and keeps the answer faithful to the evidence (fixing 'citations unverified'
+    # and fabricated details like a wrong COVID date), while preserving the agent's
+    # multi-step retrieval trace for the inspector.
+    answer, _cited, _insuff, gen_call = generate_answer(
+        question, ctx.evidence, role=role, output_mode=output_mode,
+        custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+        output_format=output_format, temperature=temperature,
+        conversation_history=conversation_history,
+    )
+    final_answer = (answer or "").strip() or final_answer or (
+        "Based on the gathered evidence, I was unable to compose a final answer.")
+    if gen_call:
+        agent_calls.append(gen_call)
+
+    # stream the grounded final answer to the live sink (chunked)
     if on_token and final_answer:
         for i in range(0, len(final_answer), 24):
             on_token(final_answer[i:i + 24])
 
+    # Pass the generator's DECLARED citations (a weak model often puts them in the structured
+    # field rather than inline) so verification matches the classic path instead of failing.
     return _build_response(question, final_answer, ctx, agent_calls, iterations,
-                           role, output_mode, t0)
+                           role, output_mode, t0, declared_cited=_cited)
 
 
 def _infer_route(ctx) -> str:
@@ -176,7 +212,7 @@ def _infer_route(ctx) -> str:
 
 
 def _build_response(question, answer, ctx, agent_calls, iterations,
-                    role, output_mode, t0) -> AskResponse:
+                    role, output_mode, t0, declared_cited=None) -> AskResponse:
     import re
 
     trace = Trace(question=question)
@@ -227,8 +263,12 @@ def _build_response(question, answer, ctx, agent_calls, iterations,
         details={"evidence_items": len(ctx.evidence)},
     ))
 
-    # verification + explainability — identical functions to the classic path
-    cited = sorted(set(re.findall(r"\[(e\d+)\]", answer)), key=lambda x: int(x[1:]))
+    # verification + explainability — identical functions to the classic path. Combine the
+    # generator's DECLARED citations with any inline [eN] markers (a weak model may supply
+    # either), so a correctly-grounded answer isn't marked "unverified" just for lacking
+    # inline markers.
+    inline = re.findall(r"\[(e\d+)\]", answer)
+    cited = sorted(set(declared_cited or []) | set(inline), key=lambda x: int(x[1:]))
     check = verify_citations(answer, cited, ctx.evidence)
     trace.citation_check = check
     cited_ids = set(check.cited_ids)

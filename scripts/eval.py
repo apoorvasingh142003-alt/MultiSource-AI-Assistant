@@ -54,6 +54,32 @@ def main() -> int:
     print(f"{'PDF':>7} {resp.trace.route.route:>7}  {'✓' if precise else '✗':>2}  "
           f"{len(resp.trace.evidence):>3}  {intent:>5}  {probe[:64]}")
 
+    # Grounding-first regression: even if the router is forced to GENERAL_KNOWLEDGE for a
+    # document-answerable question, the engine must still ground in the document (the safety
+    # net recovers it) and never emit an ungrounded parametric answer. Reproduces the
+    # nursing-home incident in miniature against the seeded contract corpus.
+    import app.routing.orchestrator as _orch
+    from app.models import LLMCall, RouteDecision
+
+    _real_classify = _orch.classify
+    _orch.classify = lambda *a, **k: (
+        RouteDecision(route="GENERAL_KNOWLEDGE", reasoning="forced GK (eval probe)",
+                      confidence=0.4, languages=["en"], document_subquery="",
+                      sql_subquery="", entity_hint="", agentic=False, strategy_note=""),
+        LLMCall(purpose="routing", model="probe", mode="stub"),
+    )
+    try:
+        gprobe = "What do our contracts say about suspension?"
+        gresp = eng.ask(gprobe)
+        grounded = (bool(gresp.trace.evidence) and not gresp.insufficient
+                    and "not grounded" not in gresp.answer.lower())
+    finally:
+        _orch.classify = _real_classify
+    passed += grounded
+    total += 1
+    print(f"{'PDF':>7} {'GK→doc':>7}  {'✓' if grounded else '✗':>2}  "
+          f"{len(gresp.trace.evidence):>3}  {'grnd':>5}  {('[grounding-first] ' + gprobe)[:64]}")
+
     print("-" * 100)
     print(f"{passed}/{total} passed\n")
     return 0 if passed == total else 1

@@ -30,6 +30,13 @@ export default function AnswerPanel({
   const [showExplain, setShowExplain] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
   const isGK = t.route?.route === "GENERAL_KNOWLEDGE";
+  const risk = resp.hallucination_risk_score;
+  const showRisk = risk != null && risk >= 0.4;
+  // Grounding-first: the router can return NONE yet the document safety net recovers a real,
+  // grounded answer. Without this, the "NONE · Insufficient evidence" badge would contradict
+  // the cited answer shown below it.
+  const recoveredFromDocs =
+    t.route?.route === "NONE" && t.evidence.length > 0 && !resp.insufficient;
 
   // Ctrl+E (dispatched from the page) toggles the explainability panel.
   React.useEffect(() => {
@@ -56,10 +63,21 @@ export default function AnswerPanel({
           <Icons.route className="h-4 w-4 text-indigo-500" />
           <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Routed to</span>
           {t.route ? <RouteBadge route={t.route.route} withLabel /> : <Pill>—</Pill>}
+          {recoveredFromDocs && (
+            <span title="The router declined, but a direct document search recovered a grounded, cited answer.">
+              <Pill tone="emerald">
+                <Icons.check className="h-3 w-3" />
+                recovered from documents
+              </Pill>
+            </span>
+          )}
         </div>
         {t.route && (
-          <span className="text-[12px] text-slate-500">
-            {(t.route.confidence * 100).toFixed(0)}% confidence
+          <span
+            className="text-[12px] text-slate-500"
+            title="How confident the router was about which source to use — not a measure of answer correctness."
+          >
+            {(t.route.confidence * 100).toFixed(0)}% router confidence
             {t.route.agentic && " · agentic"}
           </span>
         )}
@@ -69,18 +87,28 @@ export default function AnswerPanel({
           </span>
         )}
 
-        {/* General Knowledge note */}
-        {isGK && (
-          <span className="flex items-center gap-1.5 text-[12px] text-blue-600">
-            <Icons.info className="h-3.5 w-3.5" />
-            Answered from model knowledge — no indexed source contributed.
-          </span>
-        )}
-
         <span className="ml-auto flex items-center gap-1.5 text-[12px]">
           <VerificationBadge resp={resp} onClick={() => setShowExplain((v) => !v)} />
         </span>
       </Card>
+
+      {/* Ungrounded / model-knowledge warning — prominent, full-width */}
+      {isGK && (
+        <div
+          role="alert"
+          className="flex items-start gap-2.5 rounded-2xl bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/30"
+        >
+          <Icons.alert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
+          <span className="leading-relaxed">
+            Not grounded in your sources — model knowledge, may be inaccurate.
+            {showRisk && (
+              <span className="ml-1.5 inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/20 dark:text-amber-100 dark:ring-amber-400/30">
+                hallucination risk {(risk! * 100).toFixed(0)}%
+              </span>
+            )}
+          </span>
+        </div>
+      )}
 
       {/* Verification warning */}
       {resp.verification_warning && (

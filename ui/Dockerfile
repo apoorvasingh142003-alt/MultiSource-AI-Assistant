@@ -12,6 +12,9 @@ COPY . .
 # backend at API_PROXY_TARGET. In docker-compose that is the API service hostname.
 ARG API_PROXY_TARGET=http://localhost:8000
 ENV API_PROXY_TARGET=$API_PROXY_TARGET
+# Client-inlined at build: whether to gate the app behind Google sign-in.
+ARG NEXT_PUBLIC_AUTH_ENABLED=false
+ENV NEXT_PUBLIC_AUTH_ENABLED=$NEXT_PUBLIC_AUTH_ENABLED
 RUN npm run build
 
 EXPOSE 3000

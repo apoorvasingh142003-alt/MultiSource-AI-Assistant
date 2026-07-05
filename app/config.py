@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     # Local model (Ollama or any OpenAI-compatible local server). Used when the runtime
     # model mode is switched to "local" — no API key required for local endpoints.
     local_base_url: str = "http://localhost:11434/v1"
-    local_model: str = "llama3.1"
+    # Default local model. Kept in sync with scripts/local-model.sh. A 7B instruct model is
+    # the floor for reliable structured routing; the router-robustness layer (coercion +
+    # retry + rule reconciliation in app/routing/classify.py) is what makes it dependable.
+    # Bump via ABA_LOCAL_MODEL (e.g. qwen2.5:14b-instruct) for stronger routing on more RAM.
+    local_model: str = "qwen2.5:7b-instruct"
     offline_mode: str = "auto"  # auto | always | never
     llm_max_tokens: int = 2000
     # Serve an identical prior request from cache instead of re-calling the LLM.
@@ -78,9 +82,42 @@ class Settings(BaseSettings):
     semantic_keep_ratio: float = 0.35
     semantic_min_keep: int = 3
 
+    # --- Router robustness (matters most for weak local models) ------------
+    # Below this LLM-router confidence we distrust the route: we retry once and let the
+    # deterministic rule layer override a parametric route (GENERAL_KNOWLEDGE/NONE) when
+    # the rules see a grounded source. Strong API models answer well above this, so their
+    # behaviour is unchanged. Local 7B models routinely emit low-confidence routes.
+    router_low_confidence_threshold: float = 0.6
+    # When True, a low-confidence GENERAL_KNOWLEDGE/NONE route is overridden toward the
+    # grounded route the rule layer found (PDF/SQL/HYBRID) — never the reverse.
+    router_rule_override: bool = True
+
     # --- SQL safety --------------------------------------------------------
     sql_row_limit: int = 200
     sql_timeout_seconds: int = 5
+
+    # --- Auth & multi-tenancy ---------------------------------------------
+    # Master switch. OFF by default so single-tenant/dev/CI behaviour and the whole
+    # deterministic test suite are unchanged: every request resolves to `default_user_id`
+    # and owns all existing (backfilled) data. Flip ABA_AUTH_ENABLED=true in production
+    # to require a verified Google-issued identity on every user-owned route.
+    auth_enabled: bool = False
+    # Shared secret used to verify the short-lived identity JWT the Next.js auth layer
+    # mints from the Google session (HS256). MUST match NEXTAUTH's ABA_AUTH_SECRET.
+    auth_secret: str | None = Field(default=None, alias="ABA_AUTH_SECRET")
+    # Google OAuth client (used by the Next.js NextAuth layer; mirrored here for the
+    # backend to optionally validate audience). Values injected via env, never committed.
+    google_client_id: str | None = Field(default=None, alias="ABA_GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="ABA_GOOGLE_CLIENT_SECRET")
+    # Identity used for every request when auth is disabled (single-tenant fallback).
+    default_user_id: str = "default"
+    default_user_email: str = "local@localhost"
+
+    # --- Database ----------------------------------------------------------
+    # SQLAlchemy-style URL for the session/tenant store. Defaults to the local SQLite
+    # file (dev + CI, zero infra); set to postgresql+psycopg://user:pass@host/db in
+    # production for concurrent multi-tenant use. Increment 3 routes storage through this.
+    database_url: str | None = None  # None → derive sqlite path from data_path
 
     # --- Paths -------------------------------------------------------------
     data_dir: str = "data"
@@ -102,6 +139,13 @@ class Settings(BaseSettings):
     @property
     def cache_dir(self) -> Path:
         return self.data_path / "cache"
+
+    @property
+    def state_path(self) -> Path:
+        # Mutable per-tenant state (sessions/workspaces/users DB). Kept in its own
+        # directory so it can be mounted on a persistent Docker volume WITHOUT shadowing
+        # the seeded, image-baked demo content (business.db, pdfs/) under data_path.
+        return self.data_path / "state"
 
     @property
     def anthropic_key(self) -> str:

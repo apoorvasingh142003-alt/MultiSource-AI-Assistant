@@ -14,6 +14,15 @@ from app.config import get_settings
 log = logging.getLogger("aba.migrations")
 
 _SESSIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    picture TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -72,7 +81,22 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 
 def _db_path() -> Path:
-    return get_settings().data_path / "sessions.db"
+    s = get_settings()
+    state = s.state_path
+    # Migrate a legacy sessions.db (older layout kept it directly under data/) into the
+    # new persistent state/ dir on first run, so existing history isn't stranded.
+    legacy = s.data_path / "sessions.db"
+    target = state / "sessions.db"
+    if legacy.exists() and not target.exists():
+        try:
+            state.mkdir(parents=True, exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                src = legacy.parent / f"sessions.db{suffix}"
+                if src.exists():
+                    target.with_name(f"sessions.db{suffix}").write_bytes(src.read_bytes())
+        except Exception:
+            pass
+    return target
 
 
 _initialized = False
@@ -94,17 +118,55 @@ def get_session_db() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     if not _initialized:
         conn.executescript(_SESSIONS_SCHEMA)
-        # additive column migrations (safe/idempotent)
-        for table, col, decl in (("messages", "edited_at", "TEXT"),):
+        # additive column migrations (safe/idempotent). Adding user_id here (rather than in
+        # the CREATE TABLE) lets existing databases upgrade in place without a rebuild.
+        for table, col, decl in (
+            ("messages", "edited_at", "TEXT"),
+            ("sessions", "user_id", "TEXT"),
+            ("workspaces", "user_id", "TEXT"),
+        ):
             try:
                 cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
                 if col not in cols:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except Exception:
                 pass
+        _seed_and_backfill_tenancy(conn)
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_workspaces_user ON workspaces(user_id, created_at)",
+        ):
+            try:
+                conn.execute(stmt)
+            except Exception:
+                pass
         conn.commit()
         _initialized = True
     return conn
+
+
+def _seed_and_backfill_tenancy(conn: sqlite3.Connection) -> None:
+    """Ensure the default user exists and no user-owned row is left orphaned.
+
+    When auth is disabled every request resolves to ``default_user_id`` (see app/auth.py),
+    so all pre-existing sessions/workspaces are attributed to that user. Idempotent.
+    """
+    s = get_settings()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, email, name) VALUES (?, ?, ?)",
+            (s.default_user_id, s.default_user_email, "Local User"),
+        )
+        conn.execute(
+            "UPDATE sessions SET user_id = ? WHERE user_id IS NULL OR user_id = ''",
+            (s.default_user_id,),
+        )
+        conn.execute(
+            "UPDATE workspaces SET user_id = ? WHERE user_id IS NULL OR user_id = ''",
+            (s.default_user_id,),
+        )
+    except Exception:
+        pass
 
 
 def init_db() -> None:

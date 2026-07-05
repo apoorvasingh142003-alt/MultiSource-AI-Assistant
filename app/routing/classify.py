@@ -157,6 +157,45 @@ def rule_route(question: str) -> RouteDecision:
     )
 
 
+_VALID_ROUTES = {"PDF", "SQL", "HYBRID", "NONE", "GENERAL_KNOWLEDGE"}
+
+
+def _coerce_route(data: dict, fallback: RouteDecision) -> RouteDecision:
+    """Build a RouteDecision from a possibly partial/malformed LLM payload, defaulting any
+    missing or wrong-typed field to the deterministic ``rule_route`` result.
+
+    Weak local models (7B) routinely omit required fields, return the wrong type, or wrap
+    the JSON in prose. Before this, ``RouteDecision(**data)`` would raise on a missing
+    required field and crash the request — or a bad ``route`` string would mis-route. Now a
+    broken payload degrades gracefully to the rule-layer decision instead. A well-formed
+    payload (the normal API-model case) passes through unchanged."""
+    if not isinstance(data, dict):
+        return fallback
+    out = fallback.model_dump()
+    route = str(data.get("route", "")).strip().upper()
+    if route in _VALID_ROUTES:
+        out["route"] = route
+    conf = data.get("confidence")
+    try:
+        if conf is not None:
+            out["confidence"] = max(0.0, min(1.0, float(conf)))
+    except (TypeError, ValueError):
+        pass
+    for k in ("reasoning", "document_subquery", "sql_subquery", "entity_hint", "strategy_note"):
+        v = data.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v
+    if isinstance(data.get("agentic"), bool):
+        out["agentic"] = data["agentic"]
+    langs = data.get("languages")
+    if isinstance(langs, list) and langs and all(isinstance(x, str) for x in langs):
+        out["languages"] = langs
+    try:
+        return RouteDecision(**out)
+    except Exception:
+        return fallback
+
+
 def _is_general_knowledge(question: str) -> bool:
     """Secondary classifier: can this NONE-routed question be answered from general
     world knowledge? Uses the LLM to decide. Falls back to False (keep NONE) on error."""
@@ -214,12 +253,57 @@ def classify(question: str, capability_brief: str, agent_role: str | None = None
         purpose="routing", model=s.model_router, system=_SYSTEM, user=user,
         schema=_ROUTE_SCHEMA, fallback=_fallback,
     )
-    decision = RouteDecision(**data)
+    decision = _coerce_route(data, fallback_decision)
+
+    # --- router robustness (live only) -------------------------------------------------
+    # Offline/cached paths use rule_route verbatim (call.mode != "live"), so the
+    # deterministic test suite stays byte-identical. A weak local model often returns
+    # malformed JSON or a low-confidence parametric route (GENERAL_KNOWLEDGE/NONE) for a
+    # question the rule layer recognises as grounded — these guards recover that.
+    if s.use_live_llm and call.mode == "live":
+        coerced_fell_back = (decision.route == fallback_decision.route
+                             and decision.reasoning == fallback_decision.reasoning)
+        if coerced_fell_back or decision.confidence < s.router_low_confidence_threshold:
+            retry_user = user + (
+                "\n\nIMPORTANT: respond with VALID JSON only, matching the schema exactly. "
+                "If ANY uploaded document could plausibly contain the answer, choose PDF — "
+                "never GENERAL_KNOWLEDGE and never NONE for a question about a person, a "
+                "record, or a fact that an uploaded document could state."
+            )
+            data2, call2 = llm.structured(
+                purpose="routing_retry", model=s.model_router, system=_SYSTEM,
+                user=retry_user, schema=_ROUTE_SCHEMA, fallback=_fallback,
+            )
+            d2 = _coerce_route(data2, fallback_decision)
+            if d2.confidence >= decision.confidence:
+                decision, call = d2, call2
+
     if not decision.languages:
         decision.languages = fallback_decision.languages
 
-    # Secondary classifier: upgrade NONE → GENERAL_KNOWLEDGE if answerable
-    if decision.route == "NONE" and _is_general_knowledge(question):
+    # Rule-vs-LLM reconciliation: never let a *low-confidence* parametric route override a
+    # grounded route the deterministic rules found. Grounding-first — only downgrades
+    # GENERAL_KNOWLEDGE/NONE → PDF/SQL/HYBRID, never the reverse. This is the primary defence
+    # that keeps a weak router from sending a document-answerable question to fabrication.
+    if (s.router_rule_override
+            and decision.route in ("GENERAL_KNOWLEDGE", "NONE")
+            and fallback_decision.route in ("PDF", "SQL", "HYBRID")
+            and decision.confidence < s.router_low_confidence_threshold):
+        prev = decision.route
+        decision.route = fallback_decision.route
+        decision.agentic = fallback_decision.agentic
+        decision.confidence = max(decision.confidence, 0.55)
+        decision.reasoning += (
+            f" [reconciled {prev}→{decision.route}: low router confidence; the rule layer "
+            f"found a grounded source that could answer]"
+        )
+
+    # Secondary classifier: upgrade NONE → GENERAL_KNOWLEDGE only when the rule layer ALSO
+    # saw no in-scope source — so a document-answerable question is never routed to the
+    # ungrounded parametric path. Runs after reconciliation.
+    if (decision.route == "NONE"
+            and fallback_decision.route in ("NONE", "GENERAL_KNOWLEDGE")
+            and _is_general_knowledge(question)):
         decision.route = "GENERAL_KNOWLEDGE"
         decision.reasoning += " [upgraded to GENERAL_KNOWLEDGE by secondary classifier]"
         decision.confidence = 0.75

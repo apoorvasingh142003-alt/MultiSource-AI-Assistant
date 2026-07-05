@@ -11,12 +11,12 @@ from typing import Optional
 from app.generation.analysis import (attach_trust_factors, compute_contributions,
                                      compute_hallucination_risk, detect_contradictions)
 from app.generation.generate import (generate_answer, generate_answer_stream,
-                                     generate_general_knowledge)
+                                     generate_general_knowledge, generate_grounded_advice)
 from app.generation.verify import verify_citations
 from app.models import (AskResponse, Evidence, GenerationStep, LLMCall, RouteDecision,
                         StageTiming, Trace)
 from app.pricing import summarize
-from app.retrieval.intent import content_terms, is_document_lookup
+from app.retrieval.intent import content_terms, is_advice_question, is_document_lookup
 from app.roles import get_role
 from app.routing.classify import classify
 from app.sources.base import router_capability_brief
@@ -24,6 +24,15 @@ from app.sources.document_source import DocumentSource
 from app.sources.relational_source import RelationalSource
 
 logger = logging.getLogger("aba.orchestrator")
+
+# Prepended to every parametric (model-knowledge) answer so an ungrounded response can
+# never be mistaken for one cited from the user's sources. This is the last-resort path:
+# it only runs after retrieval over in-scope documents genuinely found nothing on-topic.
+_GK_DISCLAIMER = (
+    "⚠️ **Not found in your uploaded sources.** The following is from the model's general "
+    "knowledge — it is **not grounded** in your documents or database and may be inaccurate. "
+    "Verify against an authoritative source before relying on it.\n\n"
+)
 
 
 class Orchestrator:
@@ -112,7 +121,9 @@ class Orchestrator:
         # adopt the result only if it is lexically on-topic — so genuinely out-of-scope
         # questions still honestly decline. See docs/root-cause-analysis.md.
         safety_net_fired = False
+        doc_search_attempted = False
         if self._should_try_doc_safety_net(decision.route, evidence, allowed_docs):
+            doc_search_attempted = True
             sn_ev = self._doc_safety_net(trace, question, decision, allowed_docs)
             if sn_ev:
                 evidence += sn_ev
@@ -182,14 +193,56 @@ class Orchestrator:
         if not evidence:
             # Nothing was retrieved — give an honest, specific account of what was
             # searched and why no answer could be grounded (never fabricate).
-            if decision.route == "GENERAL_KNOWLEDGE":
-                # Generate from LLM general knowledge
+            #
+            # GROUNDING-FIRST GUARANTEE: a parametric (model-knowledge) answer is only
+            # permissible when the question is GENERAL_KNOWLEDGE *and* either no documents
+            # were in scope, or the in-scope documents were actually searched and returned
+            # nothing on-topic. We must never emit a silent ungrounded answer for a question
+            # whose answer could live in documents we never searched — that is exactly the
+            # failure that fabricated the nursing-home medications. See docs/grounding-first-fix.md.
+            docs_out_of_scope = allowed_docs is not None and len(allowed_docs) == 0
+            # ADVICE / RECOMMENDATION questions ("would you recommend X to him?"): never
+            # bare-decline and never answer from parametric knowledge alone. Ground the
+            # subject's relevant facts from the documents (cited) and add clearly-labelled,
+            # disclaimed general guidance. PART 1 is citation-verified like any grounded answer.
+            advice = is_advice_question(question) and not docs_out_of_scope
+            gk_parametric_ok = decision.route == "GENERAL_KNOWLEDGE" and (
+                docs_out_of_scope or doc_search_attempted
+            )
+            if advice:
+                ctx_ev = self._advice_context(
+                    trace, question, decision, allowed_docs, conversation_history
+                )
+                if ctx_ev:
+                    for i, e in enumerate(ctx_ev, start=1):
+                        e.id = f"e{i}"
+                    evidence = ctx_ev
+                    trace.evidence = evidence
+                answer, cited, insufficient, gen_call = generate_grounded_advice(
+                    question, evidence, role=role, output_mode=output_mode,
+                    custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                    output_format=output_format, temperature=temperature,
+                    conversation_history=conversation_history,
+                )
+                if on_token and answer:
+                    on_token(answer)
+                trace.notes.append(
+                    f"Advice question — grounded {len(evidence)} subject-context passage(s); "
+                    "general guidance is clearly labelled as ungrounded."
+                    if evidence else
+                    "Advice question — no grounded subject context; answered with clearly-"
+                    "labelled general guidance only."
+                )
+                # fall through to the normal verify/finalize below
+            elif gk_parametric_ok:
+                # Generate from LLM general knowledge — clearly labelled as ungrounded.
                 answer, gen_call = generate_general_knowledge(
                     question, role=role, output_mode=output_mode,
                     custom_system_prompt=custom_system_prompt,
                     agent_role=agent_role,
                     output_format=output_format, temperature=temperature,
                 )
+                answer = _GK_DISCLAIMER + (answer or "")
                 if on_token and answer:
                     on_token(answer)
                 if gen_call:
@@ -197,11 +250,12 @@ class Orchestrator:
                 # Create synthetic evidence
                 synthetic_ev = Evidence(
                     id="e1",
-                    source_name="LLM general knowledge",
+                    source_name="LLM general knowledge (ungrounded)",
                     source_kind="documents",
-                    content="Answer generated from model training data, not from any "
-                            "indexed document or database.",
-                    citation_label="[LLM general knowledge]",
+                    content="⚠️ Ungrounded: this answer was generated from the model's "
+                            "training data, NOT from any uploaded document or database. It "
+                            "could not be verified against your sources and may be inaccurate.",
+                    citation_label="[ungrounded model knowledge]",
                     score=None,
                     extra={"type": "parametric"},
                 )
@@ -243,8 +297,9 @@ class Orchestrator:
                 return AskResponse(
                     question=question, answer=answer, insufficient=False,
                     citations=evidence, trace=trace,
-                    # parametric answers carry inherent unverifiable risk (no grounding)
-                    hallucination_risk_score=0.3,
+                    # parametric answers carry inherent unverifiable risk (no grounding);
+                    # surfaced loudly in the UI so it can never be mistaken for a cited answer.
+                    hallucination_risk_score=0.5,
                 )
             else:
                 answer = self._no_evidence_answer(decision, trace)
@@ -354,8 +409,11 @@ class Orchestrator:
         self, route: str, evidence: list[Evidence], allowed_docs: Optional[list[str]]
     ) -> bool:
         """Fire the safety net when documents are in scope but the route produced no
-        document evidence — i.e. the router declined (NONE), routed PDF/HYBRID but
-        retrieval came back empty, or mis-routed a doc question to SQL with no rows.
+        document evidence — i.e. the router declined (NONE), upgraded to GENERAL_KNOWLEDGE,
+        routed PDF/HYBRID but retrieval came back empty, or mis-routed a doc question to SQL
+        with no rows. This is the GROUNDING-FIRST trigger: it guarantees in-scope documents
+        are actually searched before any parametric (model-knowledge) answer is permitted,
+        so a weak router that says GENERAL_KNOWLEDGE cannot bypass retrieval and fabricate.
         Never fires when a SQL route already returned rows, or when documents are out
         of scope."""
         if allowed_docs is not None and len(allowed_docs) == 0:
@@ -401,6 +459,29 @@ class Orchestrator:
         logger.info("doc safety-net recovered %d passage(s) for route=%s question=%r",
                     len(ev), decision.route, question)
         return ev
+
+    def _advice_context(self, trace: Trace, question: str, decision: RouteDecision,
+                        allowed_docs: Optional[list[str]],
+                        conversation_history: Optional[list[dict]]) -> list[Evidence]:
+        """Retrieve the subject's grounded context for an advice/recommendation question.
+        Builds the query from the question PLUS the most recent user turn, so a pronoun
+        ("would you recommend it to him?") resolves to the subject named earlier. Adopts the
+        passages only when they are lexically on-topic with that combined query — otherwise
+        the advice answer falls back to clearly-labelled general guidance with no fabricated
+        context."""
+        filters: dict = {}
+        if decision.languages:
+            filters["languages"] = decision.languages
+        if allowed_docs:
+            filters["documents"] = allowed_docs
+        ctx_query = question
+        for turn in reversed(conversation_history or []):
+            if (turn or {}).get("role") == "user" and (turn.get("content") or "").strip():
+                ctx_query = f"{turn['content']} {question}"
+                break
+        ev, dtrace = self.documents.retrieve(ctx_query, filters=filters)
+        trace.document_retrieval = dtrace
+        return ev if (ev and _on_topic(ctx_query, ev)) else []
 
     # -- branches ----------------------------------------------------------
     def _doc_branch(self, trace: Trace, query: str, languages: list[str] | None = None,
@@ -529,15 +610,23 @@ class Orchestrator:
 
 
 def _on_topic(question: str, evidence: list[Evidence]) -> bool:
-    """Deterministic relevance gate for the safety net: the top recovered passage must
-    share at least one content word (non-stopword token) with the question. Keeps the
-    'honest grounding' guarantee — genuinely out-of-scope questions whose corpus has no
-    lexical overlap are still declined, even offline with no LLM to judge relevance."""
+    """Deterministic relevance gate for the safety net: at least one of the TOP-3 recovered
+    passages must share a content word (non-stopword token) with the question. Widened from
+    a single-passage check that silently dropped a relevant passage ranked #2/#3 (and then
+    let the model fabricate an ungrounded answer) — checking the top 3 strictly ADDS
+    recoveries without ever adopting an off-topic corpus. Genuinely out-of-scope questions,
+    whose corpus has no lexical overlap in any of the top passages, are still declined —
+    preserving the 'honest grounding' guarantee even offline with no LLM to judge relevance."""
+    if not evidence:
+        return False
     terms = set(content_terms(question))
     if not terms:
         return True                            # nothing distinctive to gate on; trust generation
-    top = (evidence[0].content or "").lower()
-    return any(t in top for t in terms)
+    for e in evidence[:3]:
+        text = (e.content or "").lower()
+        if any(t in text for t in terms):
+            return True
+    return False
 
 
 def _documents_from_rows(rows: list[dict]) -> list[str]:

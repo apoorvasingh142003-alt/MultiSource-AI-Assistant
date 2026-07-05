@@ -35,6 +35,10 @@ services:
       # running on the host (see extra_hosts below); override either via .env.
       ABA_LOCAL_BASE_URL: ${ABA_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
       ABA_LOCAL_MODEL: ${ABA_LOCAL_MODEL:-qwen2.5:7b-instruct}
+      # Auth & multi-tenancy. When enabled, every user-owned route requires a valid
+      # identity JWT (minted by the UI's NextAuth layer, verified with the shared secret).
+      ABA_AUTH_ENABLED: ${ABA_AUTH_ENABLED:-false}
+      ABA_AUTH_SECRET: ${ABA_AUTH_SECRET:-}
     extra_hosts:
       # Map host.docker.internal -> the host gateway so the container can reach
       # a locally-running Ollama (compose doesn't add this automatically).
@@ -43,6 +47,11 @@ services:
       # Persist the embedding + LLM-response cache across restarts so the engine
       # warms up instantly (no re-embedding the corpus on every (re)start).
       - aba_cache:/app/data/cache
+      # Persist per-tenant state (sessions/workspaces/users DB) and customer uploads
+      # across rebuilds/recreates. Without these, chat history & uploads are wiped on
+      # every `docker compose up --build`. (Increment 3 moves the tenant store to Postgres.)
+      - aba_state:/app/data/state
+      - aba_uploads:/app/data/uploads
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 10s
@@ -56,8 +65,18 @@ services:
       args:
         # The Next server proxies /api/* to the API service (single public origin, no CORS).
         API_PROXY_TARGET: http://api:8000
+        # Build-time (client-inlined): gate the app behind Google sign-in.
+        NEXT_PUBLIC_AUTH_ENABLED: ${NEXT_PUBLIC_AUTH_ENABLED:-false}
     environment:
       API_PROXY_TARGET: http://api:8000
+      # NextAuth (server-side, runtime). NEXTAUTH_URL must be the public origin so the
+      # Google OAuth callback resolves; secrets are read from .env (never committed).
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://assistant.lazysnail.xyz}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Shared with the API to sign the identity JWT the backend verifies.
+      ABA_AUTH_SECRET: ${ABA_AUTH_SECRET:-}
     ports:
       - "3000:3000"
     depends_on:
@@ -84,5 +103,27 @@ services:
       - ui
     restart: unless-stopped
 
+  # PERMANENT public URL — Cloudflare *Named Tunnel* (token-based).
+  #   Brings the app up at a stable hostname (e.g. https://assistant.lazysnail.xyz)
+  #   that is live whenever this stack is running. Unlike the quick `tunnel` above,
+  #   the URL never changes. DNS is auto-managed by Cloudflare for that subdomain,
+  #   so nothing at the zone apex (the existing quiz site) is touched.
+  #
+  # One-time setup (see scripts/tunnel.sh header for the click-by-click):
+  #   1. Cloudflare Zero Trust → Networks → Tunnels → Create tunnel (Cloudflared) → copy the token.
+  #   2. In that tunnel's Public Hostname tab: subdomain=assistant, domain=lazysnail.xyz,
+  #      service = HTTP → ui:3000  (cloudflared reaches the UI over this compose network).
+  #   3. Put the token in .env as CLOUDFLARE_TUNNEL_TOKEN=...
+  # Run:  ./scripts/tunnel.sh   (or: docker compose --profile named-tunnel up -d named-tunnel)
+  named-tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["named-tunnel"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - ui
+    restart: unless-stopped
+
 volumes:
   aba_cache:
+  aba_state:
+  aba_uploads:

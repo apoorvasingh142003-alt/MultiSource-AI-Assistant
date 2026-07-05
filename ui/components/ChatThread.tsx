@@ -129,9 +129,13 @@ function Turn({
           ) : (
             /* historical turn — text only (no persisted trace) */
             <Card className="p-4">
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
                 {turn.route && <RouteBadge route={turn.route as any} small withLabel />}
                 <span className="text-[10.5px] uppercase tracking-wider text-slate-400">Previous answer</span>
+                <Pill tone="slate" className="ml-auto" >
+                  <Icons.clock className="h-3 w-3" />
+                  not re-verified
+                </Pill>
               </div>
               <CitedText text={turn.text || ""} onCite={() => {}} rtl={false} />
               <div className="mt-2 flex items-center gap-2">

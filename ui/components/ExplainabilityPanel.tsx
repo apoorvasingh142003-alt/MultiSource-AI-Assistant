@@ -218,8 +218,11 @@ export default function ExplainabilityPanel({
   const usedEvidence = t.evidence.filter((e) => e.used);
 
   return (
-    <Card className="p-4 space-y-5 fade-up">
-      <SectionTitle>🔍 How This Answer Was Produced</SectionTitle>
+    <Card className="space-y-5 p-4 fade-up">
+      <div className="flex items-center gap-2">
+        <Icons.search className="h-4 w-4 text-indigo-500" />
+        <SectionTitle>How this answer was produced</SectionTitle>
+      </div>
 
       {/* Step flowchart */}
       {steps.length > 0 && (
@@ -300,13 +303,25 @@ export default function ExplainabilityPanel({
           <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
             Timing Breakdown
           </h4>
-          <div className="flex flex-wrap gap-2">
-            {t.timings.map((tm) => (
-              <Pill key={tm.name}>
-                {tm.name}: {tm.duration_ms}ms
-              </Pill>
-            ))}
-          </div>
+          {(() => {
+            const maxMs = Math.max(...t.timings.map((tm) => tm.duration_ms), 1);
+            return (
+              <div className="space-y-1.5">
+                {t.timings.map((tm) => (
+                  <div key={tm.name} className="flex items-center gap-3">
+                    <span className="w-32 shrink-0 truncate text-[11.5px] font-medium text-slate-600">{tm.name}</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                      <span
+                        className="block h-full rounded-full bg-indigo-400"
+                        style={{ width: `${Math.max(4, (tm.duration_ms / maxMs) * 100)}%` }}
+                      />
+                    </span>
+                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-slate-500">{tm.duration_ms} ms</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
     </Card>
