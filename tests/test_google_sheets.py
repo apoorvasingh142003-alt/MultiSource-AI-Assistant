@@ -52,6 +52,27 @@ def test_build_sqlite_sanitises_and_inserts(tmp_path):
     assert len(rows) == 2
 
 
+def test_build_sqlite_handles_empty_header_and_ragged_rows(tmp_path):
+    # No header row + rows of differing width must not crash (regression for the 500).
+    path = tmp_path / "r.db"
+    table = gs.build_sqlite(path, "Data", [], [["a", "b", "c"], ["d"]])
+    conn = sqlite3.connect(str(path))
+    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')]
+    rows = conn.execute(f'SELECT * FROM "{table}"').fetchall()
+    conn.close()
+    assert cols == ["col1", "col2", "col3"]      # synthesised
+    assert rows == [("a", "b", "c"), ("d", "", "")]  # short row padded
+
+
+def test_read_sheet_skips_leading_blank_rows(monkeypatch):
+    meta = {"properties": {"title": "T"}, "sheets": [{"properties": {"title": "S"}}]}
+    values = [[], ["", ""], ["Name", "Qty"], ["A", "1"]]
+    monkeypatch.setattr(gs, "_get", _fake_get(meta, values))
+    _, header, data = gs.read_sheet("t", "s")
+    assert header == ["Name", "Qty"]
+    assert data == [["A", "1"]]
+
+
 def test_import_sheet_for_user_registers_table(tmp_path, monkeypatch):
     monkeypatch.setattr(gs, "read_sheet",
                         lambda tok, sid: ("Sales", ["Region", "Total"], [["EU", "5"], ["US", "9"]]))

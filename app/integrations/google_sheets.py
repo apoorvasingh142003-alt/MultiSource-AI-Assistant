@@ -67,6 +67,9 @@ def read_sheet(token: str, spreadsheet_id: str) -> tuple[str, list[str], list[li
     first = (sheets[0].get("properties") or {}).get("title") or "Sheet1"
     rng = urllib.parse.quote(first)
     values = _get(f"{_SHEETS_API}/{spreadsheet_id}/values/{rng}", token).get("values", [])
+    # Drop leading fully-empty rows (Sheets can return blank rows above the header).
+    while values and not any(str(c).strip() for c in values[0]):
+        values.pop(0)
     if not values:
         raise SheetsError("That sheet is empty.")
     header = [str(c) for c in values[0]]
@@ -85,6 +88,12 @@ def _safe_ident(name: str, fallback: str) -> str:
 def build_sqlite(path, table_name: str, header: list[str], data: list[list[str]]) -> str:
     """Write the rows into a fresh SQLite file with one all-TEXT table. Returns the table name."""
     table = _safe_ident(table_name, "sheet")
+    # Column count must cover the header AND the widest data row (sheets are often ragged);
+    # synthesise names for any missing/empty header cells so we never emit an empty schema.
+    ncols = max([len(header)] + [len(r) for r in data]) if (header or data) else 0
+    if ncols == 0:
+        raise SheetsError("That sheet has no data to import.")
+    header = list(header) + [f"col{i + 1}" for i in range(len(header), ncols)]
     seen: dict[str, int] = {}
     cols: list[str] = []
     for i, h in enumerate(header):
