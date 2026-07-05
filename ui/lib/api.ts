@@ -271,6 +271,21 @@ export async function telegramUnlink(): Promise<void> {
   await postJSON("/telegram/unlink", {});
 }
 
+/* ---- WhatsApp channel ---- */
+export interface WhatsAppStatus { linked: boolean; chats: number }
+export interface WhatsAppLinkInfo {
+  code: string; deep_link: string | null; expires_in_minutes: number; business_number: string | null;
+}
+export async function whatsappStatus(): Promise<WhatsAppStatus> {
+  return getJSON<WhatsAppStatus>("/whatsapp/status");
+}
+export async function whatsappLink(): Promise<WhatsAppLinkInfo> {
+  return postJSON<WhatsAppLinkInfo>("/whatsapp/link", {});
+}
+export async function whatsappUnlink(): Promise<void> {
+  await postJSON("/whatsapp/unlink", {});
+}
+
 /* ---- Google Sheets ---- */
 export interface SheetImportResult {
   ok: boolean; title: string; table: string; rows: number;

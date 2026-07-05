@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     # Telegram can call our webhook.
     telegram_webhook_secret: str | None = Field(default=None, alias="ABA_TELEGRAM_WEBHOOK_SECRET")
 
+    # WhatsApp (Meta Cloud API). Reactive replies (within the 24h user-initiated window)
+    # are free-form text — no message templates needed for answering questions.
+    whatsapp_phone_number_id: str | None = Field(default=None, alias="ABA_WHATSAPP_PHONE_NUMBER_ID")
+    whatsapp_access_token: str | None = Field(default=None, alias="ABA_WHATSAPP_ACCESS_TOKEN")
+    whatsapp_verify_token: str | None = Field(default=None, alias="ABA_WHATSAPP_VERIFY_TOKEN")
+    whatsapp_business_number: str | None = Field(default=None, alias="ABA_WHATSAPP_BUSINESS_NUMBER")
+
     # --- Database ----------------------------------------------------------
     # SQLAlchemy-style URL for the session/tenant store. Defaults to the local SQLite
     # file (dev + CI, zero infra); set to postgresql+psycopg://user:pass@host/db in

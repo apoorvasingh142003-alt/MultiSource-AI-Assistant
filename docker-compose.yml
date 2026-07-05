@@ -44,6 +44,10 @@ services:
       ABA_TELEGRAM_BOT_TOKEN: ${ABA_TELEGRAM_BOT_TOKEN:-}
       ABA_TELEGRAM_BOT_USERNAME: ${ABA_TELEGRAM_BOT_USERNAME:-}
       ABA_TELEGRAM_WEBHOOK_SECRET: ${ABA_TELEGRAM_WEBHOOK_SECRET:-}
+      ABA_WHATSAPP_PHONE_NUMBER_ID: ${ABA_WHATSAPP_PHONE_NUMBER_ID:-}
+      ABA_WHATSAPP_ACCESS_TOKEN: ${ABA_WHATSAPP_ACCESS_TOKEN:-}
+      ABA_WHATSAPP_VERIFY_TOKEN: ${ABA_WHATSAPP_VERIFY_TOKEN:-}
+      ABA_WHATSAPP_BUSINESS_NUMBER: ${ABA_WHATSAPP_BUSINESS_NUMBER:-}
     extra_hosts:
       # Map host.docker.internal -> the host gateway so the container can reach
       # a locally-running Ollama (compose doesn't add this automatically).
