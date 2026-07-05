@@ -50,7 +50,7 @@ export const ROUTE_STYLE: Record<Route, { pill: string; dot: string; label: stri
   SQL: { pill: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", label: "Database" },
   HYBRID: { pill: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", label: "Hybrid" },
   NONE: { pill: "bg-slate-100 text-slate-600 ring-slate-200", dot: "bg-slate-400", label: "Insufficient evidence" },
-  GENERAL_KNOWLEDGE: { pill: "bg-blue-50 text-blue-700 ring-blue-200", dot: "bg-blue-500", label: "General Knowledge" },
+  GENERAL_KNOWLEDGE: { pill: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", label: "Ungrounded" },
 };
 
 export function RouteBadge({ route, small, withLabel }: { route: Route; small?: boolean; withLabel?: boolean }) {

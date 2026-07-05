@@ -42,7 +42,11 @@ class Settings(BaseSettings):
     # Local model (Ollama or any OpenAI-compatible local server). Used when the runtime
     # model mode is switched to "local" — no API key required for local endpoints.
     local_base_url: str = "http://localhost:11434/v1"
-    local_model: str = "llama3.1"
+    # Default local model. Kept in sync with scripts/local-model.sh. A 7B instruct model is
+    # the floor for reliable structured routing; the router-robustness layer (coercion +
+    # retry + rule reconciliation in app/routing/classify.py) is what makes it dependable.
+    # Bump via ABA_LOCAL_MODEL (e.g. qwen2.5:14b-instruct) for stronger routing on more RAM.
+    local_model: str = "qwen2.5:7b-instruct"
     offline_mode: str = "auto"  # auto | always | never
     llm_max_tokens: int = 2000
     # Serve an identical prior request from cache instead of re-calling the LLM.
@@ -77,6 +81,16 @@ class Settings(BaseSettings):
     min_evidence_score: float = 0.015
     semantic_keep_ratio: float = 0.35
     semantic_min_keep: int = 3
+
+    # --- Router robustness (matters most for weak local models) ------------
+    # Below this LLM-router confidence we distrust the route: we retry once and let the
+    # deterministic rule layer override a parametric route (GENERAL_KNOWLEDGE/NONE) when
+    # the rules see a grounded source. Strong API models answer well above this, so their
+    # behaviour is unchanged. Local 7B models routinely emit low-confidence routes.
+    router_low_confidence_threshold: float = 0.6
+    # When True, a low-confidence GENERAL_KNOWLEDGE/NONE route is overridden toward the
+    # grounded route the rule layer found (PDF/SQL/HYBRID) — never the reverse.
+    router_rule_override: bool = True
 
     # --- SQL safety --------------------------------------------------------
     sql_row_limit: int = 200

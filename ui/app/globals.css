@@ -60,6 +60,16 @@ body {
   border-radius: 12px;
 }
 
+/* In dark mode soften the heavy drop shadow and align muted surfaces. */
+html.dark .surface,
+:root[data-theme="dark"] .surface {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+html.dark .surface-muted,
+:root[data-theme="dark"] .surface-muted {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 /* Subtle focus ring used on inputs/buttons */
 .focus-ring:focus-visible {
   outline: none;

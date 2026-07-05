@@ -434,16 +434,20 @@ export default function Page() {
               </div>
 
               {/* composer */}
-              <div className="sticky bottom-0 mt-4 pb-1">
-                <Card className="p-2.5 shadow-lg">
+              <div className="sticky bottom-0 mt-4 pb-2">
+                <Card className="p-2.5 shadow-lg ring-1 ring-slate-200/60 transition focus-within:ring-indigo-300">
                   <textarea
                     value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onComposerKey}
-                    rows={2} placeholder="Message Nexus AI…  (Enter to send, Shift+Enter for newline)"
-                    className="focus-ring max-h-40 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[15px] text-slate-800 placeholder:text-slate-400" />
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-[11px] text-slate-400">
-                      {settings.agentMode && <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-600">Agent mode</span>}
-                      {settings.temperature > 0 && <span>temp {settings.temperature.toFixed(1)}</span>}
+                    rows={2} placeholder="Message Nexus AI…"
+                    className="focus-ring max-h-40 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[15px] leading-relaxed text-slate-800 placeholder:text-slate-400" />
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                      {settings.agentMode && <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">Agent mode</span>}
+                      {settings.temperature > 0 && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500">temp {settings.temperature.toFixed(1)}</span>}
+                      <span className="hidden sm:inline">
+                        <kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Enter</kbd> to send ·
+                        <kbd className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Shift</kbd>+<kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Enter</kbd> for newline
+                      </span>
                     </span>
                     <Button size="md" onClick={() => run(input)} disabled={busy || !input.trim()}>
                       {busy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Icons.arrowR className="h-4 w-4" />}

@@ -408,3 +408,90 @@ def generate_general_knowledge(
         return answer, call
     except Exception:
         return _fallback()["answer"], None
+
+
+# Begins PART 2 of every grounded-advice answer — the line the model is required to lead the
+# guidance section with, so general (parametric) guidance is never mistaken for a grounded fact.
+ADVICE_GUIDANCE_DISCLAIMER = (
+    "⚠️ The following is general guidance from model knowledge, not from your uploaded "
+    "sources, and may be inaccurate."
+)
+
+
+def generate_grounded_advice(
+    question: str,
+    evidence: list[Evidence],
+    role: Optional[str] = None,
+    output_mode: str = "Standard Response",
+    custom_system_prompt: Optional[str] = None,
+    agent_role: Optional[str] = None,
+    output_format: Optional[str] = "auto",
+    temperature: Optional[float] = None,
+    conversation_history: Optional[list[dict]] = None,
+):
+    """Answer a recommendation/advice question in TWO clearly-separated parts:
+    PART 1 grounds the subject's relevant facts from ``evidence`` (cited, never invented);
+    PART 2 gives clearly-labelled, disclaimed general guidance. Returns the standard
+    ``(answer, citations, insufficient, call)`` tuple so the orchestrator finalises it like
+    any grounded answer (real citation verification runs over PART 1)."""
+    s = get_settings()
+    llm = get_llm()
+    role_obj = get_role(role)
+    role_label = role_obj.label if role_obj.name != "default" else "Domain Advisor"
+    if agent_role:
+        role_label = agent_role
+    has_ctx = bool(evidence)
+
+    system = (
+        "You are Nexus AI, an Adaptive Multi-Domain Intelligence Agent.\n"
+        f"Assigned Role: {role_label}\n"
+        f"Output Mode: {output_mode or 'Standard Response'}\n\n"
+        "The user asked for a recommendation / judgement / opinion. Answer in TWO clearly "
+        "separated, labelled parts and NEVER blur them:\n\n"
+        "PART 1 — From the record:\n"
+        "Use ONLY the Evidence block. State the facts about the subject that are relevant to "
+        "the question, each with its [eN] citation. If the Evidence does not address the "
+        "topic, say plainly that the record does not mention it. NEVER invent names, dates, "
+        "doses, diagnoses, events, or citations — if it is not in the Evidence, it is not a "
+        "fact about this subject.\n\n"
+        "PART 2 — General guidance (not from your sources):\n"
+        f"Begin this part with EXACTLY this sentence: \"{ADVICE_GUIDANCE_DISCLAIMER}\"\n"
+        "Then give accurate, well-established general guidance, relating it to the grounded "
+        "facts from Part 1 where relevant. Do NOT attach [eN] citations to Part 2.\n\n"
+        "Write in the language of the question. Output ONLY the two-part answer as plain "
+        "text — do NOT wrap it in JSON or any object."
+    )
+    if agent_role:
+        system = f"You are {agent_role}.\n\n{system}"
+    if custom_system_prompt:
+        system = f"{custom_system_prompt}\n\n{system}"
+
+    if has_ctx:
+        user = _build_user_message(question, evidence, conversation_history)
+    else:
+        user = (f"Question: {question}\n\nEvidence:\n(The record returned no passages relevant "
+                "to this question — state that in Part 1, then give Part 2 guidance.)")
+
+    def _fallback() -> str:
+        lead = ("PART 1 — From the record: the record could not be consulted right now.\n\n"
+                if not has_ctx else "")
+        return (lead + "PART 2 — General guidance (not from your sources):\n"
+                + ADVICE_GUIDANCE_DISCLAIMER
+                + " The advisory service is temporarily unavailable; please try again.")
+
+    # Prose, not JSON: free-form two-part text avoids weak-model JSON-wrapping artifacts.
+    try:
+        answer, call = llm.text(
+            purpose="grounded_advice_generation", model=s.model_generation,
+            system=system, user=user, fallback=_fallback,
+            max_tokens=1500, temperature=temperature,
+        )
+        answer = (answer or "").replace("\\n", "\n").strip()
+    except Exception:
+        answer = _fallback()
+        call = None
+    # Safety net: if the model omitted the disclaimer, force it in front of any guidance.
+    if ADVICE_GUIDANCE_DISCLAIMER not in answer:
+        answer = (answer + "\n\n" if answer else "") + ADVICE_GUIDANCE_DISCLAIMER
+    cited = sorted(set(re.findall(r"\[(e\d+)\]", answer)), key=lambda x: int(x[1:]))
+    return answer, cited, False, call

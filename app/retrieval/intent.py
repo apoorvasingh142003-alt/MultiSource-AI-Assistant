@@ -180,6 +180,27 @@ def is_document_lookup(query: str) -> bool:
     return has_container or has_lookup
 
 
+# Advice / recommendation / judgement cues — questions that ask the assistant to give an
+# opinion or recommendation rather than retrieve a stated fact. These are answerable only by
+# combining the subject's grounded context with general (parametric) knowledge.
+_ADVICE_CUE = re.compile(
+    r"\b(recommend|advis(?:e|able)|suggest|should\s+(?:he|she|they|we|i|you|the\s+patient)|"
+    r"is\s+it\s+(?:safe|ok|okay|wise|advisable|a\s+good\s+idea)|would\s+you\s+(?:recommend|suggest|advise)|"
+    r"do\s+you\s+(?:recommend|suggest|advise)|good\s+idea\s+to|safe\s+(?:to|for)\s+him|"
+    r"what\s+should\s+(?:he|she|they|we|i)|ought\s+to)\b",
+    re.I,
+)
+
+
+def is_advice_question(query: str) -> bool:
+    """True when the question asks for a recommendation / judgement / opinion (e.g. "would you
+    recommend X to him?", "should he take Y?", "is it safe for him to…?"). Such questions are
+    not answerable from documents alone: the honest treatment is to ground the subject's
+    relevant facts from the sources AND add clearly-labelled, disclaimed general guidance —
+    never to fabricate, and never to silently answer from parametric knowledge as if grounded."""
+    return bool(_ADVICE_CUE.search(query or ""))
+
+
 def text_hits(text: str, gate_terms: list[str]) -> bool:
     """True if the chunk text literally contains any gate term (case-insensitive)."""
     if not gate_terms:

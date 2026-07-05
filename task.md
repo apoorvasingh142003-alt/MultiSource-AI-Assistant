@@ -1,91 +1,79 @@
-# Nexus AI — Enterprise Upgrade Task Tracker
+# Nexus AI — Task Tracker (Grounding-First Robustness round)
 
-> Branch `enterprise-upgrade`. `[x]` = implemented & verified. Full reasoning in `IMPLEMENTATION_PLAN.md`.
-> Suite: **56 passed, 10 skipped** · UI `tsc` + `next build` clean.
+> Branch `enterprise-upgrade`. `[x]` = implemented & verified. Reasoning in `IMPLEMENTATION_PLAN.md`,
+> incident write-up in `docs/grounding-first-fix.md`.
+> Suite: **108 passed, 10 skipped** · `scripts/eval.py` 10/10 · flagship HYBRID ev=9 · UI `tsc` + `next build` clean.
 
-## Backend
+## Backend — grounding-first guarantee
 
-### B1 — Per-request temperature
-- [x] `temperature` threaded `structured`/`text` → `_run` → `_dispatch` → `_call_openai`/`_call_anthropic`
-- [x] Folded into cache key only when non-zero (temp-0 cache preserved)
-- [x] Threaded through `generate_answer`/`generate_general_knowledge` → orchestrator → engine → `AskRequest`
-- [x] Routing + SQL stay deterministic (temperature 0)
+### G1 — Relevance gate widened (no silent evidence drop)
+- [x] `_on_topic()` checks **any of the top-3** passages for a shared content word (was top-1 only)
+- [x] Honest decline preserved: out-of-scope corpora with no lexical overlap still decline
+- [x] Verified: `test_out_of_scope_still_declined` (Berlin headcount / weather) still passes
 
-### B2 — Multi-turn conversation
-- [x] `app/conversation.py`: `load_history` (rowid-ordered) + `format_history_block` (char cap, recent-first)
-- [x] `AskRequest.conversation_history`; engine loads from `session_id` when omitted
-- [x] History fed to `classify()` (reference-resolving routing) and `generate_answer` (context, not evidence)
-- [x] Live-verified: "the first of those customers" resolves across turns
+### G2 — Parametric answer gated behind real retrieval
+- [x] `GENERAL_KNOWLEDGE` parametric branch only runs after in-scope docs were searched and found nothing on-topic (or no docs in scope)
+- [x] Never overrides on-topic document/DB evidence
+- [x] Loud `_GK_DISCLAIMER` prepended to every parametric answer; synthetic evidence relabelled "ungrounded"
+- [x] `hallucination_risk_score` for parametric answers raised 0.3 → 0.5
 
-### B3 — Message edit / delete / regenerate
-- [x] `PATCH /sessions/{sid}/messages/{mid}` (sets `edited_at`)
-- [x] `DELETE /sessions/{sid}/messages/{mid}`
-- [x] `POST /sessions/{sid}/messages/{mid}/regenerate` (rebuilds context, re-runs, overwrites)
-- [x] `edited_at` column via idempotent migration; rowid tiebreaker for same-second ordering
+### G3 — Tolerant route coercion for weak models
+- [x] `_coerce_route(data, fallback)` — validates route enum, clamps confidence to [0,1], fills missing/typed-wrong fields from `rule_route`, never raises
+- [x] Replaces the bare `RouteDecision(**data)` that crashed on a missing required field
 
-### B4 — Real token streaming
-- [x] `LLMClient.stream_text` (OpenAI/Anthropic native streaming; offline chunks cached/fallback text)
-- [x] `generate_answer_stream` (prose mode; `[eN]` citations recovered post-hoc and verified)
-- [x] `/ask/stream` rewritten: worker thread + `asyncio.Queue`; real token deltas; word fallback for non-streaming paths
-- [x] Verified: 340 token deltas on a document answer
+### G4 — Retry + rule-vs-LLM reconciliation (live-only)
+- [x] One retry with a terser directive prompt on malformed/low-confidence (`< 0.6`) routing
+- [x] Low-confidence `GENERAL_KNOWLEDGE`/`NONE` overridden toward the grounded rule-layer route (`PDF`/`SQL`/`HYBRID`) — never the reverse
+- [x] `NONE → GENERAL_KNOWLEDGE` upgrade moved AFTER reconciliation; only when the rule layer also found no in-scope source
+- [x] All gated behind `use_live_llm` + `call.mode == "live"` → offline/cached paths byte-identical
 
-### B5 — LangGraph iterative agent
-- [x] `app/agent/tools.py` — `sql_query` / `search_documents` wrap existing sources; shared `AgentRunContext`
-- [x] `app/agent/graph.py` — `StateGraph` agent⇄tools loop (ChatOpenAI + bind_tools, recursion cap)
-- [x] `app/agent/runner.py` — runs the graph, rebuilds the standard `Trace`, runs existing verify/contributions/contradiction/risk
-- [x] `Trace.agent_trace` (additive); `agent_mode` toggle; import-guarded `agent_available()`
-- [x] SSE `agent_step` / `agent_observation` events; graceful offline fallback to classic path
-- [x] Verified: HYBRID question uses both tools, 6 evidence, populated Inspector/Explainability
+### G5 — Config & local-model defaults
+- [x] `router_low_confidence_threshold: float = 0.6`, `router_rule_override: bool = True`
+- [x] `local_model` default aligned to `qwen2.5:7b-instruct` (matches `scripts/local-model.sh`); bump via `ABA_LOCAL_MODEL`
 
-### B6 — Semantic chunking
-- [x] Sentence-respecting, structure-aware chunking (~900 chars, 180 overlap) replacing fixed window; deterministic ids
-- [x] Hard-window fallback only for pathologically long sentences
+### G7 — Agent-mode grounding-first (LangGraph path)
+- [x] No evidence gathered → `run_agent` falls back to the classic grounding-first `orch.ask` (fixes "Who is the nurse?" → GENERAL_KNOWLEDGE fabrication)
+- [x] Evidence gathered → final answer produced by reliable `generate_answer` over collected evidence (enforces citations, kills fabricated dates + off-topic GLOBEX leak in Sources)
+- [x] `_build_response` verification combines declared + inline citations (fixes false "citations unverified")
+- [x] `tests/test_agent_grounding.py`; live-verified in agent mode (Roberts / Feldman / correct meds, only nursing_home_.pdf cited, zero fabrication)
 
-### B7 — German replaces Hebrew
-- [x] Generic `detect_language` (German vs English); RTL repair retired
-- [x] Router detects German (`["de"]`), German contract vocabulary; example + tests updated
-- [x] German sample contract (`TABOR_Vertrag_DE.pdf`) + reseeded DB; Hebrew files removed
-- [x] Verified: German question routes PDF, retrieves German contract, answers in German
+### G6 — Grounded advice for recommendation questions
+- [x] `is_advice_question()` (`retrieval/intent.py`) detects recommend/advise/should/is-it-safe questions
+- [x] `generate_grounded_advice()` (`generation/generate.py`) — two-part PROSE answer: PART 1 grounded + cited from the subject's record, PART 2 clearly-labelled general guidance led by a forced disclaimer; never fabricates, never bare-declines
+- [x] Orchestrator resolves the subject from conversation history (pronoun "him" → Mohammad Ben), retrieves his context, and routes advice questions here instead of declining
+- [x] Live-verified on local model: "would you recommend smokeless tobacco to him?" → grounds dementia [e1] + disclaimed guidance advising against it; zero fabricated staff/meds
 
-## Frontend
+## Frontend — trust correctness + visual polish
 
-### F-API — client + types
-- [x] `AskOptions` with `temperature` / `agent_mode` / `conversation_history`
-- [x] `askStream` handles `agent_step` / `agent_observation`; `AbortSignal` support
-- [x] `editMessage` / `deleteMessage` / `regenerateMessage`; `Message.edited_at`; `AgentTrace` types
+### U1 — Ungrounded answers are loud
+- [x] `GENERAL_KNOWLEDGE` → prominent amber/rose "not grounded — model knowledge, may be inaccurate" banner (was a subtle blue info line)
+- [x] `VerificationBadge` GK state is a warning pill, never a calm/positive state
+- [x] Hallucination risk % surfaced for parametric / high-risk answers
 
-### F0 — State lifecycle
-- [x] Single settings store (`useAiSettings`) — one localStorage key, single source of truth
-- [x] `activeSessionId` persisted; conversation restored on reload
-- [x] Consistent loading / streaming / empty / error states
+### U2 — Honest confidence labelling
+- [x] Confidence relabelled **router confidence** with a tooltip clarifying it is not answer correctness
 
-### F1 — Removals
-- [x] Demo tab deleted (tab + render + component)
-- [x] Response-Style (RoleSelector) panel deleted — role lives only in AI Settings
+### U3 — Historical turns
+- [x] Reloaded turns show a "not re-verified" indicator (never indistinguishable from a verified answer)
 
-### F2 — Chat experience
-- [x] `Chat` tab (default) with threaded conversation (`ChatThread.tsx`)
-- [x] Token streaming render + live agent-step panel
-- [x] Per-turn edit / delete / regenerate / copy; ChatGPT-style composer (Enter to send)
-- [x] Workspace slimmed to sources-only (uploads + inventory)
+### U4 — Truncation honesty
+- [x] Indicators for capped SQL rows / compact evidence ("+N more…")
 
-### F3 — Merged Output control
-- [x] One `Output` dropdown (`OUTPUT_OPTIONS` → `{output_mode, output_format}`); overlaps deduped
+### U5 — Visual polish
+- [x] Spacing/typography, cohesive light+dark palette, refined chat bubbles + composer, clearer route/trust pills, better empty/loading/streaming/error states, cleaner header, more legible explainability/trace panels
+- [x] Only existing `ui/lib/types.ts` fields used; `tsc --noEmit` + `next build` clean
 
-### F4 — Settings panel
-- [x] Settings modal: applied temperature slider (0–1, labelled), theme, default role/output, reasoning toggles
-- [x] API-key / local-model sections scaffolded as "coming soon" (deferred)
+## Tests & docs
 
-### F5 — Evidence
-- [x] Full evidence text (scrollable, never truncated); section names full-on-hover
+- [x] `tests/test_grounding_first.py` — forced-GK still grounds; no fabricated values; OOS declined/disclaimed
+- [x] `tests/test_router_robustness.py` — coercion survives garbage; low-conf GK reconciled; confident GK respected
+- [x] `tests/test_nursing_home_red_team.py` — grounded facts correct; never-fabricate invariant; OOS declines
+- [x] `scripts/eval.py` — grounding-first regression line; HYBRID stays ev=9
+- [x] `docs/grounding-first-fix.md` — incident + PDF comparison + root cause
+- [x] `IMPLEMENTATION_PLAN.md` + `task.md` regenerated for this round
 
-### F6 — German + polish
-- [x] German language labels; Hebrew RTL checks dropped; agent-timeline panel on completed answers
-- [x] Settings/agent/temperature badges in the top bar + composer
+## Stack
 
-## Constraints & tests
-- [x] Additive request/trace fields + SSE events; classic path unchanged
-- [x] Idempotent migration (`edited_at`); rowid ordering tiebreaker
-- [x] Agent deps import-guarded; offline path needs no LangChain
-- [x] `tests/test_chat_upgrade.py` (temperature, history, message CRUD, agent fallback)
-- [x] Full suite **56 passed / 10 skipped**; UI `tsc` + `next build` clean
+- [x] Rebuilt & restarted (`docker compose up -d --build`), `/health` OK, flipped to local mode (`qwen2.5:7b-instruct`)
+- [x] Live E2E on local model: the incident question now grounds correctly (Donepezil 10mg, Metformin, Lisinopril, Acetaminophen, Vitamin D; nurses Roberts & Tran) — zero fabricated values; "capital of France" answers with the loud not-grounded disclaimer (risk 0.5)
+- [x] UI: `NONE`-route answers recovered by the safety net show a "recovered from documents" chip (no more "Insufficient evidence" badge over a grounded answer)

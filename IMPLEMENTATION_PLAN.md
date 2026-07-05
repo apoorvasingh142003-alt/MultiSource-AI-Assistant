@@ -1,86 +1,85 @@
-# Implementation Plan — Nexus AI Enterprise Upgrade (Agentic Chat)
+# Implementation Plan — Grounding-First Robustness + UI Trust Upgrade
 
-**Goal of this round:** turn a high-quality single-shot RAG engine into an enterprise,
-ChatGPT-like **agentic, multi-turn, streaming** assistant — without regressing the
-routing / retrieval / verification / explainability that already works.
+**Branch:** `enterprise-upgrade` · **Status:** implemented & verified (see `task.md`).
 
-**Branch:** `enterprise-upgrade`  ·  **Status:** implemented & verified (see `task.md`).
+**Goal of this round:** make the assistant **safe and dependable on a weak local model**.
+A local Ollama run (`qwen2.5:7b-instruct`) routed a document-answerable question to
+`GENERAL_KNOWLEDGE` and **fabricated** medications/staff that contradicted the uploaded
+nursing-home PDF. This round makes grounding unconditional, hardens routing for small models,
+makes the UI tell the truth loudly, and adds an adversarial test + red-team suite — without
+regressing the API path, the 56-test baseline, or the flagship HYBRID demo (evidence = 9).
+
+Full incident write-up + side-by-side fabrication table: `docs/grounding-first-fix.md`.
 
 ---
 
-## 1. What changed and why
+## 1. Root cause
 
-The previous build was a stateless Q→A engine: each `/ask` was independent, settings were
-scattered across three unsynced places, evidence was truncated, the multilingual demo used
-Hebrew, and there was a Demo tab. This round delivers a conversational product:
+A **routing-trust** problem, not a transport problem. Ollama already runs through the
+unified OpenAI-compatible client (`app/llm/client.py`); the weakness is the *model*. The weak
+7B router returned `GENERAL_KNOWLEDGE` (confidence 0.4), and the orchestrator had a parametric
+escape hatch reachable whenever the only guard — a single-token `_on_topic()` lexical check —
+dropped the recovered evidence. So a weak router could bypass retrieval and answer from
+training data. **LangChain/ChatOllama would not fix this** (it does not improve structured-output
+quality); the fix is architectural.
 
-- **Two-way, multi-turn conversation** — follow-ups resolve references ("the first of those
-  customers") because prior turns are threaded into routing + generation.
-- **LangGraph iterative agent** — an optional agent that loops over tools (SQL → docs →
-  answer), wrapping the *existing* sources so every trace/explainability panel still works.
-- **Real token-by-token streaming** with live agent-step events.
-- **Editable history** — edit / delete / regenerate any turn.
-- **Applied temperature**, a **dedicated Settings panel**, a **single settings store**,
-  a **merged Output control**, **untruncated evidence**, **German** multilingual showcase,
-  and the **Demo tab + Response-Style panel removed**.
-
-## 2. Architecture decisions
-
-- **Hybrid LangChain adoption** (confirmed with the user): the conversational plumbing
-  (history, streaming, edit/delete) is library-agnostic; **LangGraph** powers only the
-  optional iterative agent, which wraps the existing pipeline as tools. The classic path is
-  untouched and remains the offline/no-key fallback. The agent layer is **import-guarded** —
-  if `langgraph`/`langchain-openai` are missing or there's no live LLM, the engine silently
-  uses the classic path.
-- **Additive, not destructive.** New request fields (`temperature`, `agent_mode`,
-  `conversation_history`), a new `Trace.agent_trace`, and new SSE events
-  (`agent_step` / `agent_observation`) are all additive — existing consumers keep working.
-- **Determinism preserved.** Temperature applies to *final generation only*; routing and
-  SQL stay at temperature 0, and the temperature-0 response cache is never invalidated
-  (temperature is folded into the cache key only when non-zero).
-
-## 3. Backend (app/)
+## 2. Backend — grounding-first guarantee
 
 | ID | Area | Key files |
 |----|------|-----------|
-| B1 | Per-request temperature threaded llm-client → generation | `llm/client.py`, `generation/generate.py`, `routing/orchestrator.py`, `engine.py`, `models.py` |
-| B2 | Multi-turn conversation context (router + generator) | `conversation.py` (new), `routing/classify.py`, `generation/generate.py`, `engine.py` |
-| B3 | Message edit / delete / regenerate endpoints | `api/routes.py`, `db/migrations.py` (`edited_at`) |
-| B4 | Real token streaming (`stream_text`, `generate_answer_stream`); SSE rewrite | `llm/client.py`, `generation/generate.py`, `api/routes.py` |
-| B5 | LangGraph iterative agent (tools / graph / runner) + `agent_trace` | `agent/{tools,graph,runner}.py` (new), `engine.py`, `models.py` |
-| B6 | Structure-aware semantic chunking (sentence-respecting, overlap) | `ingestion/pdf.py` |
-| B7 | German replaces Hebrew; generic language detection; German sample doc | `ingestion/pdf.py`, `routing/classify.py`, `engine.py`, `scripts/make_pdfs.py`, `scripts/seed_data.py` |
+| G1 | `_on_topic()` widened (single passage → any of top-3 share a content word); honest decline preserved | `routing/orchestrator.py` |
+| G2 | `GENERAL_KNOWLEDGE` parametric branch gated behind a real in-scope document search; never overrides on-topic evidence; loud disclaimer prepended; `hallucination_risk_score` 0.3 → 0.5 | `routing/orchestrator.py` |
+| G3 | `_coerce_route()` — tolerant of malformed/partial 7B JSON (clamp confidence, validate enum, fill from rule layer) | `routing/classify.py` |
+| G4 | One retry on malformed/low-confidence routing; rule-vs-LLM reconciliation (low-conf `GENERAL_KNOWLEDGE`/`NONE` → grounded route, never the reverse); `NONE→GK` upgrade moved after reconciliation | `routing/classify.py` |
+| G5 | `router_low_confidence_threshold` (0.6), `router_rule_override` (True); `local_model` default aligned to `qwen2.5:7b-instruct` | `config.py` |
+| G6 | Advice/recommendation questions → two-part **grounded context + disclaimed general guidance** (never fabricate, never bare-decline); subject resolved from conversation history | `retrieval/intent.py`, `generation/generate.py`, `routing/orchestrator.py` |
 
-**Streaming bridge:** `/ask/stream` runs `engine.ask` on a worker thread with an `on_token`
-sink that pushes deltas onto an `asyncio.Queue`; agent steps go through `on_event`. The
-classic path streams real generation tokens; non-streaming paths (multi-agent, offline) fall
-back to progressive word delivery so the UI is never blank.
+**Determinism preserved.** All new router logic is gated behind `use_live_llm` + `call.mode ==
+"live"`, so offline/cached paths (the entire deterministic test suite) are byte-identical.
+Reconciliation only ever *downgrades toward grounding*; it cannot push a question to the
+parametric path.
 
-## 4. Frontend (ui/)
+## 3. Frontend — trust correctness + visual polish (`ui/`)
 
 | ID | Area | Key files |
 |----|------|-----------|
-| F0 | Single settings store (source of truth, persisted) + `activeSessionId` persistence | `components/AiSettingsPanel.tsx`, `app/page.tsx` |
-| F1 | Remove Demo tab + Response-Style (RoleSelector) panel | deleted `Demo.tsx`, `RoleSelector.tsx`; `page.tsx` |
-| F2 | Chat tab + threaded conversation (streaming, agent steps, edit/delete/regenerate) | `components/ChatThread.tsx` (new), `app/page.tsx`, slimmed `Workspace.tsx` (sources only) |
-| F3 | Merged Output control (presentation × format → one dropdown) | `AiSettingsPanel.tsx` (`OUTPUT_OPTIONS`, `resolveOutput`) |
-| F4 | Settings modal with applied temperature slider | `components/SettingsPanel.tsx` (new), `page.tsx` |
-| F5 | Untruncated evidence (full, scrollable) | `components/trace.tsx` |
-| F6 | German labels, drop Hebrew RTL checks, agent-timeline panel, enterprise polish | `trace.tsx`, `AnswerPanel.tsx`, `Workspace.tsx` |
-| F-API | `temperature`/`agent_mode`/`conversation_history`, new SSE events, message CRUD | `lib/api.ts`, `lib/types.ts` |
+| U1 | `GENERAL_KNOWLEDGE` → prominent amber/rose "not grounded" warning banner (was a subtle blue info line); surface risk % | `components/AnswerPanel.tsx`, `components/VerificationBadge.tsx` |
+| U2 | Confidence relabelled as **router** confidence (+ tooltip): it is not answer correctness | `components/AnswerPanel.tsx` |
+| U3 | Historical turns show a "not re-verified" indicator (never indistinguishable from a verified answer) | `components/ChatThread.tsx` |
+| U4 | Truncation indicators for capped SQL rows / compact evidence | `components/trace.tsx` |
+| U5 | Visual polish: spacing/typography, cohesive light+dark palette, refined bubbles/composer/pills, clearer states, header, explainability legibility | `app/globals.css`, `components/ui.tsx`, panels |
 
-## 5. Verification (done)
+The backend prepends the parametric disclaimer to the answer text; the UI renders it
+prominently. Constraint: only fields already in `ui/lib/types.ts`; `tsc --noEmit` + `next
+build` stay clean.
 
-- **Backend:** `pytest` → **56 passed, 10 skipped**. New `tests/test_chat_upgrade.py` covers
-  temperature cache-key behaviour, history formatting/cap, message edit/delete/regenerate,
-  and offline agent fallback.
-- **Live E2E (TestClient + real key):** multi-turn follow-up resolves a cross-turn reference
-  (Q1 lists overdue customers → Q2 "the first of those customers" answers from Acme's
-  contract); agent mode answers a SQL+doc question with both tools and a populated trace;
-  German contract retrieves and answers in German; SSE emits real token deltas + agent events.
-- **Frontend:** `tsc --noEmit` clean, `next build` clean.
+## 4. Local-model robustness (no LangChain migration)
 
-## 6. Deferred (explicitly, per user)
+Transport unchanged (`runtime.set_model_mode` keeps the OpenAI-compatible Ollama path). The
+robustness layer (§2) is what makes a 7B route dependably. `langchain`/`langgraph` stay only
+for the optional iterative agent. Bump the model via `ABA_LOCAL_MODEL` (e.g.
+`qwen2.5:14b-instruct`) for stronger routing on more RAM.
 
-- API-key management + local-model switch UI (scaffolded as "coming soon" in Settings).
-- Deeper retrieval/embedding-model evaluation (semantic chunking landed; bge-m3 retained).
+## 5. Tests & verification
+
+- `tests/test_grounding_first.py` (new) — forced-`GENERAL_KNOWLEDGE` still grounds in the PDF;
+  no fabricated values; out-of-scope is declined or loudly disclaimed.
+- `tests/test_router_robustness.py` (new) — `_coerce_route` survives garbage; low-conf GK
+  reconciles to grounded; confident GK respected.
+- `tests/test_nursing_home_red_team.py` (new) — adversarial Q&A over the real PDF: correct
+  grounded facts, never-fabricate invariant, out-of-scope declines.
+- `scripts/eval.py` — grounding-first regression line added; flagship HYBRID stays at ev = 9.
+- **Suite: 108 passed, 10 skipped** (was 56/10). `scripts/eval.py` 10/10. UI `tsc` + `next
+  build` clean. Live local-mode E2E: meds question grounds (Donepezil 10 mg, Metformin,
+  Lisinopril, Acetaminophen, Vitamin D); "capital of France" answers with the loud disclaimer.
+
+---
+
+## Appendix — previous round (enterprise agentic-chat upgrade)
+
+The prior round turned the single-shot RAG engine into a ChatGPT-like **agentic, multi-turn,
+streaming** assistant: per-request temperature, multi-turn conversation context, message
+edit/delete/regenerate, real token streaming, an optional LangGraph iterative agent (wrapping
+the existing sources as tools), structure-aware semantic chunking, German multilingual
+showcase, a single settings store, and a merged Output control. That work remains intact and
+unregressed; this round is additive on top of it.
