@@ -1,0 +1,19 @@
+Ticket ID,Customer,Subject,Priority,Status,Category,Opened Date,Assigned To,Resolution Days
+TKT-1001,Acme Corp,Login fails after password reset,High,Open,Authentication,2026-06-28,Ravi Menon,
+TKT-1002,Globex Ltd,Export to CSV times out,Medium,In Progress,Reporting,2026-06-27,Lena Ortiz,
+TKT-1003,Initech,Invoice PDF shows wrong totals,High,Resolved,Billing,2026-06-20,Ravi Menon,4
+TKT-1004,Umbrella Inc,Dashboard loads slowly on mobile,Low,Open,Performance,2026-06-29,Tom Baker,
+TKT-1005,Soylent Co,SSO with Okta not connecting,Critical,In Progress,Authentication,2026-06-30,Lena Ortiz,
+TKT-1006,Hooli,Feature request: dark mode,Low,Open,Feature Request,2026-06-15,Tom Baker,
+TKT-1007,Stark Industries,API rate limit too aggressive,High,Resolved,API,2026-06-18,Ravi Menon,3
+TKT-1008,Wayne Enterprises,Data import skips last row,Medium,Resolved,Data Import,2026-06-22,Lena Ortiz,2
+TKT-1009,Wonka Industries,Emails going to spam,Medium,Open,Notifications,2026-06-30,Tom Baker,
+TKT-1010,Cyberdyne Systems,Model training job crashes,Critical,In Progress,Platform,2026-06-29,Ravi Menon,
+TKT-1011,Tyrell Corp,Audit log missing entries,High,Open,Compliance,2026-06-26,Lena Ortiz,
+TKT-1012,Aperture Science,Cannot invite new users,Medium,Resolved,User Management,2026-06-19,Tom Baker,5
+TKT-1013,Oscorp,Webhook deliveries failing,High,In Progress,API,2026-06-28,Ravi Menon,
+TKT-1014,Nakatomi Trading,Currency formatting incorrect,Low,Open,Localization,2026-06-25,Lena Ortiz,
+TKT-1015,Gekko Capital,Two-factor codes delayed,Critical,Resolved,Authentication,2026-06-21,Tom Baker,1
+TKT-1016,Pied Piper,Search returns no results,Medium,Open,Search,2026-06-30,Ravi Menon,
+TKT-1017,Vandelay Industries,Bulk update fails silently,High,In Progress,Data Import,2026-06-27,Lena Ortiz,
+TKT-1018,Massive Dynamic,Report scheduler not firing,Medium,Open,Reporting,2026-06-29,Tom Baker,
