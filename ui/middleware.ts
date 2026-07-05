@@ -28,9 +28,17 @@ export async function middleware(req: NextRequest) {
       .setExpirationTime("10m")
       .sign(secret);
     headers.set("authorization", `Bearer ${jwt}`);
+    // Forward the user's Google access token (server-side only) so the backend can call
+    // Google APIs (Sheets) on their behalf. Set from the session, never from the client.
+    if (token.googleAccessToken) {
+      headers.set("x-google-access-token", token.googleAccessToken as string);
+    } else {
+      headers.delete("x-google-access-token");
+    }
   } else {
-    // Never let a client-supplied Authorization header through unauthenticated.
+    // Never let a client-supplied Authorization / Google token through unauthenticated.
     headers.delete("authorization");
+    headers.delete("x-google-access-token");
   }
 
   return NextResponse.next({ request: { headers } });

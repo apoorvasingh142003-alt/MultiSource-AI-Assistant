@@ -271,6 +271,15 @@ export async function telegramUnlink(): Promise<void> {
   await postJSON("/telegram/unlink", {});
 }
 
+/* ---- Google Sheets ---- */
+export interface SheetImportResult {
+  ok: boolean; title: string; table: string; rows: number;
+  columns: string[]; status: string; error?: string | null;
+}
+export async function importSheet(url: string): Promise<SheetImportResult> {
+  return postJSON<SheetImportResult>("/sheets/import", { url });
+}
+
 /* ---- workspaces (Section 7) ---- */
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   return getJSON<Workspace[]>("/workspaces");

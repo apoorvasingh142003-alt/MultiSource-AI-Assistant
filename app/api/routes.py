@@ -19,6 +19,7 @@ from app import runtime
 from app.artifacts import generate_artifact_core
 from app.auth import CurrentUser
 from app.channels import telegram as tg
+from app.integrations import google_sheets as gsheets
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
@@ -881,3 +882,28 @@ def telegram_status(user: CurrentUser) -> dict:
 def telegram_unlink(user: CurrentUser) -> dict:
     tg.unlink(user.id)
     return {"ok": True}
+
+
+# ==============================================================================
+# Google Sheets (read a sheet into the tenant's engine as a queryable table)
+# ==============================================================================
+
+class SheetImport(BaseModel):
+    url: str
+
+
+@router.post("/sheets/import")
+def sheets_import(
+    body: SheetImport,
+    user: CurrentUser,
+    x_google_access_token: str | None = Header(default=None),
+) -> dict:
+    """Import a Google Sheet as a table in the caller's isolated engine. The user's Google
+    access token (with the Sheets scope) is forwarded by the Next middleware from their
+    session — never handled by the browser."""
+    if not x_google_access_token:
+        raise HTTPException(400, "Google Sheets isn't connected — connect it and try again.")
+    try:
+        return gsheets.import_sheet_for_user(user.id, x_google_access_token, body.url)
+    except gsheets.SheetsError as exc:
+        raise HTTPException(400, str(exc))
