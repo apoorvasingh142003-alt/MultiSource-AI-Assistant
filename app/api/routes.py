@@ -11,13 +11,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import runtime
 from app.artifacts import generate_artifact_core
 from app.auth import CurrentUser
+from app.channels import telegram as tg
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
@@ -840,3 +841,43 @@ def run_workflow(workspace_id: str, workflow_id: str, user: CurrentUser) -> dict
     if not result.get("ok") and result.get("error") == "Workflow not found":
         raise HTTPException(404, "Workflow not found")
     return result
+
+
+# ==============================================================================
+# Telegram channel (two-way bot; shared bot + per-tenant link code)
+# ==============================================================================
+
+@router.post("/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict:
+    """Public endpoint Telegram calls with updates. Authenticated by the secret Telegram
+    echoes back (set when we registered the webhook). Heavy work (engine.ask + reply) runs
+    off-thread so we ACK fast, as Telegram expects."""
+    s = get_settings()
+    if s.telegram_webhook_secret and x_telegram_bot_api_secret_token != s.telegram_webhook_secret:
+        raise HTTPException(403, "Invalid webhook secret.")
+    try:
+        update = await request.json()
+    except Exception:
+        raise HTTPException(400, "Malformed update.")
+    threading.Thread(target=tg.handle_update, args=(update,), daemon=True).start()
+    return {"ok": True}
+
+
+@router.post("/telegram/link")
+def telegram_link(user: CurrentUser) -> dict:
+    """Mint a one-time code + deep link the signed-in user redeems from Telegram."""
+    return tg.create_link_code(user.id)
+
+
+@router.get("/telegram/status")
+def telegram_status(user: CurrentUser) -> dict:
+    return tg.link_status(user.id)
+
+
+@router.post("/telegram/unlink")
+def telegram_unlink(user: CurrentUser) -> dict:
+    tg.unlink(user.id)
+    return {"ok": True}

@@ -77,6 +77,26 @@ CREATE TABLE IF NOT EXISTS workflows (
     last_run TEXT,
     status TEXT NOT NULL DEFAULT 'idle'
 );
+
+-- Messaging channels (Telegram now, WhatsApp later). A channel_link binds an external
+-- chat/phone to a tenant; a channel_link_code is a short-lived one-time code a signed-in
+-- user redeems from the channel to create that binding.
+CREATE TABLE IF NOT EXISTS channel_links (
+    id TEXT PRIMARY KEY,
+    channel TEXT NOT NULL,                 -- 'telegram' | 'whatsapp'
+    external_id TEXT NOT NULL,             -- telegram chat id / whatsapp phone
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(channel, external_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_link_codes (
+    code TEXT PRIMARY KEY,
+    channel TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+);
 """
 
 

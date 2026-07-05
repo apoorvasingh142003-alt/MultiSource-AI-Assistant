@@ -39,6 +39,11 @@ services:
       # identity JWT (minted by the UI's NextAuth layer, verified with the shared secret).
       ABA_AUTH_ENABLED: ${ABA_AUTH_ENABLED:-false}
       ABA_AUTH_SECRET: ${ABA_AUTH_SECRET:-}
+      # Public origin (webhook target + deep links) and Telegram bot credentials.
+      ABA_PUBLIC_BASE_URL: ${NEXTAUTH_URL:-https://assistant.lazysnail.xyz}
+      ABA_TELEGRAM_BOT_TOKEN: ${ABA_TELEGRAM_BOT_TOKEN:-}
+      ABA_TELEGRAM_BOT_USERNAME: ${ABA_TELEGRAM_BOT_USERNAME:-}
+      ABA_TELEGRAM_WEBHOOK_SECRET: ${ABA_TELEGRAM_WEBHOOK_SECRET:-}
     extra_hosts:
       # Map host.docker.internal -> the host gateway so the container can reach
       # a locally-running Ollama (compose doesn't add this automatically).

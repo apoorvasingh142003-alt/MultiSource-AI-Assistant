@@ -62,6 +62,13 @@ def _warm() -> None:
     from app.workflow import start_scheduler
     start_scheduler()
 
+    # Register the Telegram webhook if a bot token is configured (no-op otherwise).
+    try:
+        from app.channels.telegram import set_webhook
+        set_webhook()
+    except Exception:
+        log.exception("telegram webhook registration failed")
+
     eng = get_engine()
     log.info(
         "Engine ready: %d documents, %d chunks, tables=%s, embeddings=%s",
