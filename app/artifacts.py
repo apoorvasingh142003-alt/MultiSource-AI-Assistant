@@ -42,6 +42,19 @@ _ARTIFACT_DIRECTIVES: dict[str, str] = {
 }
 
 
+def _workspace_owner(workspace_id: str) -> str | None:
+    """The user_id that owns a workspace — so artifacts (API or scheduled) run against
+    that tenant's isolated engine. None (→ default engine) if the workspace has no owner."""
+    db = get_session_db()
+    try:
+        row = db.execute("SELECT user_id FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+        return row["user_id"] if row else None
+    except Exception:
+        return None
+    finally:
+        db.close()
+
+
 def generate_artifact_core(
     workspace_id: str, question: str, artifact_type: str, title: str,
 ) -> dict:
@@ -51,8 +64,9 @@ def generate_artifact_core(
     mem_context = get_memory_context(workspace_id)
     custom_prompt = "\n\n".join(p for p in (directive, mem_context) if p) or None
 
+    owner_id = _workspace_owner(workspace_id)
     try:
-        resp = get_engine().ask(
+        resp = get_engine(owner_id).ask(
             question, scope="all", output_format=output_format,
             custom_system_prompt=custom_prompt,
         )

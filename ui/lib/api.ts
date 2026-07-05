@@ -253,6 +253,49 @@ export async function regenerateMessage(
   );
 }
 
+/* ---- Telegram channel ---- */
+export interface TelegramStatus { linked: boolean; chats: number }
+export interface TelegramLinkInfo {
+  code: string;
+  deep_link: string | null;
+  expires_in_minutes: number;
+  bot_username: string | null;
+}
+export async function telegramStatus(): Promise<TelegramStatus> {
+  return getJSON<TelegramStatus>("/telegram/status");
+}
+export async function telegramLink(): Promise<TelegramLinkInfo> {
+  return postJSON<TelegramLinkInfo>("/telegram/link", {});
+}
+export async function telegramUnlink(): Promise<void> {
+  await postJSON("/telegram/unlink", {});
+}
+
+/* ---- Google Sheets ---- */
+export interface SheetImportResult {
+  ok: boolean; title: string; table: string; rows: number;
+  columns: string[]; status: string; error?: string | null;
+}
+export async function importSheet(url: string): Promise<SheetImportResult> {
+  return postJSON<SheetImportResult>("/sheets/import", { url });
+}
+
+/* ---- HubSpot CRM ---- */
+export interface HubSpotStatus { connected: boolean }
+export interface HubSpotImport { ok: boolean; imported: Record<string, number>; status: string }
+export async function hubspotStatus(): Promise<HubSpotStatus> {
+  return getJSON<HubSpotStatus>("/hubspot/status");
+}
+export async function hubspotConnect(token: string): Promise<HubSpotImport> {
+  return postJSON<HubSpotImport>("/hubspot/connect", { token });
+}
+export async function hubspotSync(): Promise<HubSpotImport> {
+  return postJSON<HubSpotImport>("/hubspot/sync", {});
+}
+export async function hubspotDisconnect(): Promise<void> {
+  await postJSON("/hubspot/disconnect", {});
+}
+
 /* ---- workspaces (Section 7) ---- */
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   return getJSON<Workspace[]>("/workspaces");

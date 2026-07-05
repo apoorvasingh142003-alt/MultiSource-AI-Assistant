@@ -65,11 +65,21 @@ EXAMPLES = [
 
 
 class Engine:
-    def __init__(self) -> None:
+    def __init__(self, user_id: str | None = None) -> None:
         self.settings = get_settings()
+        # Each tenant gets its own Engine (see get_engine): the shared sample corpus is
+        # rebuilt identically for everyone, but uploads + the merged upload DB live in a
+        # per-user directory and a per-user in-memory index, so one tenant's documents can
+        # never surface in another tenant's retrieval.
+        self.user_id = user_id or self.settings.default_user_id
+        self._uploads_dir = self.settings.data_path / "uploads" / self.user_id
         self.examples = EXAMPLES
         self._lock = threading.RLock()
         self._build_from_seed()
+
+    @property
+    def uploads_dir(self) -> Path:
+        return self._uploads_dir
 
     # -- assembly ----------------------------------------------------------
     def _build_from_seed(self) -> None:
@@ -153,7 +163,8 @@ class Engine:
             t0 = time.perf_counter()
             try:
                 if self._working_db_path is None:
-                    self._working_db_path = self.settings.data_path / "uploads" / "working.db"
+                    self._uploads_dir.mkdir(parents=True, exist_ok=True)
+                    self._working_db_path = self._uploads_dir / "working.db"
                     copy_seed(self._seed_db_path, self._working_db_path)
                 try:
                     merged = merge_sqlite(path, self._working_db_path, source_label=filename)
@@ -194,14 +205,13 @@ class Engine:
             return info
 
     def reset(self) -> None:
-        """Return the workspace to a clean sample state (drops all uploads)."""
+        """Return THIS tenant's workspace to a clean sample state (drops only their uploads)."""
         with self._lock:
-            # best-effort cleanup of uploaded artifacts on disk
-            up = self.settings.data_path / "uploads"
+            # best-effort cleanup of this user's uploaded artifacts on disk
             try:
                 import shutil
-                if up.exists():
-                    shutil.rmtree(up)
+                if self._uploads_dir.exists():
+                    shutil.rmtree(self._uploads_dir)
             except Exception:
                 pass
             self._build_from_seed()
@@ -371,6 +381,18 @@ def _db_info_from_schema(name: str, schema: SchemaInfo, origin: str) -> Ingested
     )
 
 
-@lru_cache
-def get_engine() -> Engine:
-    return Engine()
+@lru_cache(maxsize=64)
+def _engine_for(user_id: str) -> Engine:
+    return Engine(user_id)
+
+
+def get_engine(user_id: str | None = None) -> Engine:
+    """Return the per-tenant Engine (built + cached on first use for each user).
+
+    ``user_id=None`` resolves to the default user — used by non-tenant surfaces
+    (startup warm-up, /health, /config) and by the whole offline test suite, so their
+    behaviour is unchanged. Cached per user so repeated requests reuse the warm index;
+    the LRU cap bounds memory (an evicted tenant simply rebuilds on next request).
+    """
+    uid = user_id or get_settings().default_user_id
+    return _engine_for(uid)

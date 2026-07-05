@@ -11,13 +11,16 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import runtime
 from app.artifacts import generate_artifact_core
 from app.auth import CurrentUser
+from app.channels import telegram as tg
+from app.integrations import google_sheets as gsheets
+from app.integrations import hubspot as hs
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
@@ -157,8 +160,8 @@ def roles() -> list[dict]:
 
 
 @router.get("/inventory", response_model=Inventory)
-def inventory() -> Inventory:
-    return get_engine().inventory()
+def inventory(user: CurrentUser) -> Inventory:
+    return get_engine(user.id).inventory()
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -168,7 +171,7 @@ def ask(req: AskRequest, user: CurrentUser) -> AskResponse:
         raise HTTPException(400, "Please enter a question.")
     _guard_session_access(req.session_id, user.id)
     try:
-        resp = get_engine().ask(
+        resp = get_engine(user.id).ask(
             question, scope=req.scope, role=req.role, output_mode=req.output_mode,
             custom_system_prompt=req.custom_system_prompt,
             agent_role=req.agent_role,
@@ -239,7 +242,7 @@ async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
 
         def worker():
             try:
-                holder["resp"] = get_engine().ask(
+                holder["resp"] = get_engine(user.id).ask(
                     question, scope=req.scope, role=req.role, output_mode=req.output_mode,
                     custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
                     output_format=req.output_format, session_id=req.session_id,
@@ -302,9 +305,9 @@ async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
 # -- ingestion ---------------------------------------------------------------
 
 @router.post("/ingest/pdf", response_model=IngestResult)
-async def ingest_pdf_endpoint(files: list[UploadFile] = File(...)) -> IngestResult:
-    eng = get_engine()
-    dest_dir = get_settings().data_path / "uploads" / "pdfs"
+async def ingest_pdf_endpoint(user: CurrentUser, files: list[UploadFile] = File(...)) -> IngestResult:
+    eng = get_engine(user.id)
+    dest_dir = eng.uploads_dir / "pdfs"
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for i, f in enumerate(files):
@@ -330,9 +333,9 @@ async def ingest_pdf_endpoint(files: list[UploadFile] = File(...)) -> IngestResu
 
 
 @router.post("/ingest/sqlite", response_model=IngestResult)
-async def ingest_sqlite_endpoint(files: list[UploadFile] = File(...)) -> IngestResult:
-    eng = get_engine()
-    dest_dir = get_settings().data_path / "uploads" / "db"
+async def ingest_sqlite_endpoint(user: CurrentUser, files: list[UploadFile] = File(...)) -> IngestResult:
+    eng = get_engine(user.id)
+    dest_dir = eng.uploads_dir / "db"
     dest_dir.mkdir(parents=True, exist_ok=True)
     results = []
     for i, f in enumerate(files):
@@ -356,8 +359,8 @@ async def ingest_sqlite_endpoint(files: list[UploadFile] = File(...)) -> IngestR
 
 
 @router.post("/reset", response_model=Inventory)
-def reset() -> Inventory:
-    eng = get_engine()
+def reset(user: CurrentUser) -> Inventory:
+    eng = get_engine(user.id)
     eng.reset()
     return eng.inventory()
 
@@ -840,3 +843,107 @@ def run_workflow(workspace_id: str, workflow_id: str, user: CurrentUser) -> dict
     if not result.get("ok") and result.get("error") == "Workflow not found":
         raise HTTPException(404, "Workflow not found")
     return result
+
+
+# ==============================================================================
+# Telegram channel (two-way bot; shared bot + per-tenant link code)
+# ==============================================================================
+
+@router.post("/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict:
+    """Public endpoint Telegram calls with updates. Authenticated by the secret Telegram
+    echoes back (set when we registered the webhook). Heavy work (engine.ask + reply) runs
+    off-thread so we ACK fast, as Telegram expects."""
+    s = get_settings()
+    if s.telegram_webhook_secret and x_telegram_bot_api_secret_token != s.telegram_webhook_secret:
+        raise HTTPException(403, "Invalid webhook secret.")
+    try:
+        update = await request.json()
+    except Exception:
+        raise HTTPException(400, "Malformed update.")
+    threading.Thread(target=tg.handle_update, args=(update,), daemon=True).start()
+    return {"ok": True}
+
+
+@router.post("/telegram/link")
+def telegram_link(user: CurrentUser) -> dict:
+    """Mint a one-time code + deep link the signed-in user redeems from Telegram."""
+    return tg.create_link_code(user.id)
+
+
+@router.get("/telegram/status")
+def telegram_status(user: CurrentUser) -> dict:
+    return tg.link_status(user.id)
+
+
+@router.post("/telegram/unlink")
+def telegram_unlink(user: CurrentUser) -> dict:
+    tg.unlink(user.id)
+    return {"ok": True}
+
+
+# ==============================================================================
+# Google Sheets (read a sheet into the tenant's engine as a queryable table)
+# ==============================================================================
+
+class SheetImport(BaseModel):
+    url: str
+
+
+@router.post("/sheets/import")
+def sheets_import(
+    body: SheetImport,
+    user: CurrentUser,
+    x_google_access_token: str | None = Header(default=None),
+) -> dict:
+    """Import a Google Sheet as a table in the caller's isolated engine. The user's Google
+    access token (with the Sheets scope) is forwarded by the Next middleware from their
+    session — never handled by the browser."""
+    if not x_google_access_token:
+        raise HTTPException(400, "Google Sheets isn't connected — connect it and try again.")
+    try:
+        return gsheets.import_sheet_for_user(user.id, x_google_access_token, body.url)
+    except gsheets.SheetsError as exc:
+        raise HTTPException(400, str(exc))
+
+
+# ==============================================================================
+# HubSpot CRM (per-tenant, via a Private App token)
+# ==============================================================================
+
+class HubSpotConnect(BaseModel):
+    token: str
+
+
+@router.post("/hubspot/connect")
+def hubspot_connect(body: HubSpotConnect, user: CurrentUser) -> dict:
+    """Validate + store the caller's HubSpot token and import their CRM objects."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(400, "Paste your HubSpot Private App access token.")
+    try:
+        return hs.connect_and_import(user.id, token)
+    except hs.HubSpotError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/hubspot/status")
+def hubspot_status(user: CurrentUser) -> dict:
+    return hs.status(user.id)
+
+
+@router.post("/hubspot/sync")
+def hubspot_sync(user: CurrentUser) -> dict:
+    try:
+        return hs.resync(user.id)
+    except hs.HubSpotError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/hubspot/disconnect")
+def hubspot_disconnect(user: CurrentUser) -> dict:
+    hs.delete_token(user.id)
+    return {"ok": True}

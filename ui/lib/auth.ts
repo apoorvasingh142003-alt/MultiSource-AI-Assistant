@@ -25,10 +25,15 @@ export const authOptions: NextAuthOptions = {
       }
       if (account?.access_token) (token as Record<string, unknown>).googleAccessToken = account.access_token;
       if (account?.refresh_token) (token as Record<string, unknown>).googleRefreshToken = account.refresh_token;
+      if (account?.scope) (token as Record<string, unknown>).scope = account.scope;
       return token;
     },
     async session({ session, token }) {
       if (session.user) (session.user as { id?: string }).id = token.sub as string;
+      // Surface whether the Sheets scope has been granted (never expose the token itself).
+      const scope = (token as Record<string, unknown>).scope;
+      (session as unknown as Record<string, unknown>).sheetsConnected =
+        typeof scope === "string" && scope.includes("spreadsheets");
       return session;
     },
   },

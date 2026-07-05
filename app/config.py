@@ -113,6 +113,16 @@ class Settings(BaseSettings):
     default_user_id: str = "default"
     default_user_email: str = "local@localhost"
 
+    # --- Channels (Telegram / WhatsApp) -----------------------------------
+    # Shared bot per channel; a signed-in user links their chat with a one-time code, so
+    # inbound messages map to the right tenant and run their isolated engine.
+    public_base_url: str = "https://assistant.lazysnail.xyz"  # webhook target + deep links
+    telegram_bot_token: str | None = Field(default=None, alias="ABA_TELEGRAM_BOT_TOKEN")
+    telegram_bot_username: str | None = Field(default=None, alias="ABA_TELEGRAM_BOT_USERNAME")
+    # Secret echoed by Telegram in the X-Telegram-Bot-Api-Secret-Token header so only
+    # Telegram can call our webhook.
+    telegram_webhook_secret: str | None = Field(default=None, alias="ABA_TELEGRAM_WEBHOOK_SECRET")
+
     # --- Database ----------------------------------------------------------
     # SQLAlchemy-style URL for the session/tenant store. Defaults to the local SQLite
     # file (dev + CI, zero infra); set to postgresql+psycopg://user:pass@host/db in
