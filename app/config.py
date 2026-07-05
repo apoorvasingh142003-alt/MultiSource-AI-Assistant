@@ -141,6 +141,13 @@ class Settings(BaseSettings):
         return self.data_path / "cache"
 
     @property
+    def state_path(self) -> Path:
+        # Mutable per-tenant state (sessions/workspaces/users DB). Kept in its own
+        # directory so it can be mounted on a persistent Docker volume WITHOUT shadowing
+        # the seeded, image-baked demo content (business.db, pdfs/) under data_path.
+        return self.data_path / "state"
+
+    @property
     def anthropic_key(self) -> str:
         return (self.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 

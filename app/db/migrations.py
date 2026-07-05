@@ -81,7 +81,22 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 
 def _db_path() -> Path:
-    return get_settings().data_path / "sessions.db"
+    s = get_settings()
+    state = s.state_path
+    # Migrate a legacy sessions.db (older layout kept it directly under data/) into the
+    # new persistent state/ dir on first run, so existing history isn't stranded.
+    legacy = s.data_path / "sessions.db"
+    target = state / "sessions.db"
+    if legacy.exists() and not target.exists():
+        try:
+            state.mkdir(parents=True, exist_ok=True)
+            for suffix in ("", "-wal", "-shm"):
+                src = legacy.parent / f"sessions.db{suffix}"
+                if src.exists():
+                    target.with_name(f"sessions.db{suffix}").write_bytes(src.read_bytes())
+        except Exception:
+            pass
+    return target
 
 
 _initialized = False

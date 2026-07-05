@@ -38,3 +38,6 @@ context.md
 !/docs/overview.md
 !/docs/AI_Business_Assistant_Overview.pdf
 !/docs/images/
+
+# Per-tenant runtime state (sessions/workspaces/users DB) — never committed.
+data/state/

@@ -43,6 +43,11 @@ services:
       # Persist the embedding + LLM-response cache across restarts so the engine
       # warms up instantly (no re-embedding the corpus on every (re)start).
       - aba_cache:/app/data/cache
+      # Persist per-tenant state (sessions/workspaces/users DB) and customer uploads
+      # across rebuilds/recreates. Without these, chat history & uploads are wiped on
+      # every `docker compose up --build`. (Increment 3 moves the tenant store to Postgres.)
+      - aba_state:/app/data/state
+      - aba_uploads:/app/data/uploads
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
       interval: 10s
@@ -106,3 +111,5 @@ services:
 
 volumes:
   aba_cache:
+  aba_state:
+  aba_uploads:
