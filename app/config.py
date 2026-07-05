@@ -96,6 +96,29 @@ class Settings(BaseSettings):
     sql_row_limit: int = 200
     sql_timeout_seconds: int = 5
 
+    # --- Auth & multi-tenancy ---------------------------------------------
+    # Master switch. OFF by default so single-tenant/dev/CI behaviour and the whole
+    # deterministic test suite are unchanged: every request resolves to `default_user_id`
+    # and owns all existing (backfilled) data. Flip ABA_AUTH_ENABLED=true in production
+    # to require a verified Google-issued identity on every user-owned route.
+    auth_enabled: bool = False
+    # Shared secret used to verify the short-lived identity JWT the Next.js auth layer
+    # mints from the Google session (HS256). MUST match NEXTAUTH's ABA_AUTH_SECRET.
+    auth_secret: str | None = Field(default=None, alias="ABA_AUTH_SECRET")
+    # Google OAuth client (used by the Next.js NextAuth layer; mirrored here for the
+    # backend to optionally validate audience). Values injected via env, never committed.
+    google_client_id: str | None = Field(default=None, alias="ABA_GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="ABA_GOOGLE_CLIENT_SECRET")
+    # Identity used for every request when auth is disabled (single-tenant fallback).
+    default_user_id: str = "default"
+    default_user_email: str = "local@localhost"
+
+    # --- Database ----------------------------------------------------------
+    # SQLAlchemy-style URL for the session/tenant store. Defaults to the local SQLite
+    # file (dev + CI, zero infra); set to postgresql+psycopg://user:pass@host/db in
+    # production for concurrent multi-tenant use. Increment 3 routes storage through this.
+    database_url: str | None = None  # None → derive sqlite path from data_path
+
     # --- Paths -------------------------------------------------------------
     data_dir: str = "data"
 

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from app import runtime
 from app.artifacts import generate_artifact_core
+from app.auth import CurrentUser
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
@@ -37,6 +38,48 @@ def _safe_filename(name: str, fallback: str) -> str:
     base = Path(name or "").name
     base = _SAFE_NAME.sub("_", base).strip("._") or fallback
     return base
+
+
+# --- tenancy ownership guards ------------------------------------------------
+# Nested resources verify the PARENT belongs to the caller (not just a matching
+# child id), so tenant A can never touch tenant B's data by guessing an id.
+def _owns_session(db, session_id: str, user_id: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
+    ).fetchone()
+    return row is not None
+
+
+def _require_session(db, session_id: str, user_id: str) -> None:
+    if not _owns_session(db, session_id, user_id):
+        raise HTTPException(404, "Session not found")
+
+
+def _owns_workspace(db, workspace_id: str, user_id: str) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM workspaces WHERE id = ? AND user_id = ?", (workspace_id, user_id)
+    ).fetchone()
+    return row is not None
+
+
+def _require_workspace(db, workspace_id: str, user_id: str) -> None:
+    if not _owns_workspace(db, workspace_id, user_id):
+        raise HTTPException(404, "Workspace not found")
+
+
+def _guard_session_access(session_id: str | None, user_id: str) -> None:
+    """Allow a session_id that is either new (will be auto-created as owned) or already
+    owned by the caller; reject one that belongs to another tenant. Called by /ask so a
+    weak/guessed session_id can't load or append to someone else's conversation."""
+    if not session_id:
+        return
+    db = get_session_db()
+    try:
+        row = db.execute("SELECT user_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row and row["user_id"] not in (user_id, None, ""):
+            raise HTTPException(404, "Session not found")
+    finally:
+        db.close()
 
 
 @router.get("/health")
@@ -119,10 +162,11 @@ def inventory() -> Inventory:
 
 
 @router.post("/ask", response_model=AskResponse)
-def ask(req: AskRequest) -> AskResponse:
+def ask(req: AskRequest, user: CurrentUser) -> AskResponse:
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(400, "Please enter a question.")
+    _guard_session_access(req.session_id, user.id)
     try:
         resp = get_engine().ask(
             question, scope=req.scope, role=req.role, output_mode=req.output_mode,
@@ -157,8 +201,8 @@ def ask(req: AskRequest) -> AskResponse:
         try:
             route = resp.trace.route.route if resp.trace.route else None
             confidence = resp.trace.route.confidence if resp.trace.route else None
-            save_message(req.session_id, "user", question)
-            save_message(req.session_id, "assistant", resp.answer, route, confidence)
+            save_message(req.session_id, "user", question, user_id=user.id)
+            save_message(req.session_id, "assistant", resp.answer, route, confidence, user_id=user.id)
         except Exception:
             log.exception("failed to persist chat turn for session=%s", req.session_id)
     return resp
@@ -169,7 +213,7 @@ def _sse(event: str, data: dict) -> str:
 
 
 @router.post("/ask/stream")
-async def ask_stream(req: AskRequest) -> StreamingResponse:
+async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
     """Server-Sent Events variant of /ask. The answer is streamed token-by-token as the
     model generates it (real time-to-first-token); the complete payload (trace, citations,
     verification) follows in a final ``done`` event. Agent-mode tool steps are emitted as
@@ -177,6 +221,7 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(400, "Please enter a question.")
+    _guard_session_access(req.session_id, user.id)
 
     async def gen():
         yield _sse("status", {"stage": "processing"})
@@ -229,8 +274,8 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
             try:
                 route = resp.trace.route.route if resp.trace.route else None
                 conf = resp.trace.route.confidence if resp.trace.route else None
-                save_message(req.session_id, "user", question)
-                save_message(req.session_id, "assistant", resp.answer, route, conf)
+                save_message(req.session_id, "user", question, user_id=user.id)
+                save_message(req.session_id, "assistant", resp.answer, route, conf, user_id=user.id)
             except Exception:
                 log.exception("stream persist failed for session=%s", req.session_id)
 
@@ -322,13 +367,14 @@ def reset() -> Inventory:
 # ==============================================================================
 
 @router.get("/sessions")
-def list_sessions() -> list[dict]:
+def list_sessions(user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
         rows = db.execute(
             "SELECT s.id, s.title, s.created_at, "
             "(SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) AS message_count "
-            "FROM sessions s ORDER BY s.created_at DESC"
+            "FROM sessions s WHERE s.user_id = ? ORDER BY s.created_at DESC",
+            (user.id,)
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -336,11 +382,11 @@ def list_sessions() -> list[dict]:
 
 
 @router.post("/sessions", status_code=201)
-def create_session() -> dict:
+def create_session(user: CurrentUser) -> dict:
     sid = str(uuid.uuid4())
     db = get_session_db()
     try:
-        db.execute("INSERT INTO sessions (id) VALUES (?)", (sid,))
+        db.execute("INSERT INTO sessions (id, user_id) VALUES (?, ?)", (sid, user.id))
         db.commit()
         row = db.execute("SELECT id, title, created_at FROM sessions WHERE id = ?", (sid,)).fetchone()
         return {**dict(row), "message_count": 0}
@@ -349,9 +395,10 @@ def create_session() -> dict:
 
 
 @router.get("/sessions/{session_id}/messages")
-def get_session_messages(session_id: str) -> list[dict]:
+def get_session_messages(session_id: str, user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
+        _require_session(db, session_id, user.id)
         rows = db.execute(
             "SELECT id, session_id, role, content, route, confidence, created_at, edited_at "
             "FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC",
@@ -363,11 +410,12 @@ def get_session_messages(session_id: str) -> list[dict]:
 
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str) -> dict:
+def delete_session(session_id: str, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
+        _require_session(db, session_id, user.id)
         db.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        db.execute("DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user.id))
         db.commit()
         return {"ok": True}
     finally:
@@ -379,10 +427,12 @@ class SessionUpdate(BaseModel):
 
 
 @router.patch("/sessions/{session_id}")
-def update_session(session_id: str, body: SessionUpdate) -> dict:
+def update_session(session_id: str, body: SessionUpdate, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
-        db.execute("UPDATE sessions SET title = ? WHERE id = ?", (body.title, session_id))
+        _require_session(db, session_id, user.id)
+        db.execute("UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?",
+                   (body.title, session_id, user.id))
         db.commit()
         row = db.execute("SELECT id, title, created_at FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not row:
@@ -395,13 +445,18 @@ def update_session(session_id: str, body: SessionUpdate) -> dict:
 def save_message(
     session_id: str, role: str, content: str,
     route: str | None = None, confidence: float | None = None,
+    user_id: str | None = None,
 ) -> None:
     """Auto-save a message to the session (called after /ask)."""
     db = get_session_db()
     try:
         # Ensure the session row exists (API clients may pass a session_id without
-        # having created it first; the UI creates it via POST /sessions).
-        db.execute("INSERT OR IGNORE INTO sessions (id) VALUES (?)", (session_id,))
+        # having created it first; the UI creates it via POST /sessions). Attribute it
+        # to the caller so it's visible to (and only to) them.
+        db.execute(
+            "INSERT OR IGNORE INTO sessions (id, user_id) VALUES (?, ?)",
+            (session_id, user_id or get_settings().default_user_id),
+        )
         mid = str(uuid.uuid4())
         db.execute(
             "INSERT INTO messages (id, session_id, role, content, route, confidence) "
@@ -426,10 +481,11 @@ class MessageEdit(BaseModel):
 
 
 @router.patch("/sessions/{session_id}/messages/{message_id}")
-def edit_message(session_id: str, message_id: str, body: MessageEdit) -> dict:
+def edit_message(session_id: str, message_id: str, body: MessageEdit, user: CurrentUser) -> dict:
     """Edit a message's content in place (records edited_at)."""
     db = get_session_db()
     try:
+        _require_session(db, session_id, user.id)
         cur = db.execute(
             "UPDATE messages SET content = ?, edited_at = datetime('now') "
             "WHERE id = ? AND session_id = ?",
@@ -448,10 +504,11 @@ def edit_message(session_id: str, message_id: str, body: MessageEdit) -> dict:
 
 
 @router.delete("/sessions/{session_id}/messages/{message_id}")
-def delete_message(session_id: str, message_id: str) -> dict:
+def delete_message(session_id: str, message_id: str, user: CurrentUser) -> dict:
     """Delete a single message from a session."""
     db = get_session_db()
     try:
+        _require_session(db, session_id, user.id)
         cur = db.execute(
             "DELETE FROM messages WHERE id = ? AND session_id = ?",
             (message_id, session_id),
@@ -480,7 +537,7 @@ class RegenerateRequest(BaseModel):
 
 @router.post("/sessions/{session_id}/messages/{message_id}/regenerate",
              response_model=AskResponse)
-def regenerate_message(session_id: str, message_id: str,
+def regenerate_message(session_id: str, message_id: str, user: CurrentUser,
                        body: RegenerateRequest = Body(default=RegenerateRequest())) -> AskResponse:
     """Re-answer the user turn that produced assistant message ``message_id``.
 
@@ -489,6 +546,7 @@ def regenerate_message(session_id: str, message_id: str,
     """
     db = get_session_db()
     try:
+        _require_session(db, session_id, user.id)
         target = db.execute(
             "SELECT id, role, created_at, rowid FROM messages WHERE id = ? AND session_id = ?",
             (message_id, session_id),
@@ -548,13 +606,14 @@ def regenerate_message(session_id: str, message_id: str,
 # ==============================================================================
 
 @router.get("/workspaces")
-def list_workspaces() -> list[dict]:
+def list_workspaces(user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
         rows = db.execute(
             "SELECT w.id, w.name, w.description, w.created_at, "
             "(SELECT COUNT(*) FROM workspace_artifacts a WHERE a.workspace_id = w.id) AS artifact_count "
-            "FROM workspaces w ORDER BY w.created_at DESC"
+            "FROM workspaces w WHERE w.user_id = ? ORDER BY w.created_at DESC",
+            (user.id,)
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -567,13 +626,13 @@ class WorkspaceCreate(BaseModel):
 
 
 @router.post("/workspaces", status_code=201)
-def create_workspace(body: WorkspaceCreate) -> dict:
+def create_workspace(body: WorkspaceCreate, user: CurrentUser) -> dict:
     wid = str(uuid.uuid4())
     db = get_session_db()
     try:
         db.execute(
-            "INSERT INTO workspaces (id, name, description) VALUES (?, ?, ?)",
-            (wid, body.name, body.description),
+            "INSERT INTO workspaces (id, name, description, user_id) VALUES (?, ?, ?, ?)",
+            (wid, body.name, body.description, user.id),
         )
         db.commit()
         row = db.execute("SELECT * FROM workspaces WHERE id = ?", (wid,)).fetchone()
@@ -583,9 +642,10 @@ def create_workspace(body: WorkspaceCreate) -> dict:
 
 
 @router.delete("/workspaces/{workspace_id}")
-def delete_workspace(workspace_id: str) -> dict:
+def delete_workspace(workspace_id: str, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         db.execute("DELETE FROM workspace_artifacts WHERE workspace_id = ?", (workspace_id,))
         db.execute("DELETE FROM project_memory WHERE workspace_id = ?", (workspace_id,))
         db.execute("DELETE FROM workflows WHERE workspace_id = ?", (workspace_id,))
@@ -597,9 +657,10 @@ def delete_workspace(workspace_id: str) -> dict:
 
 
 @router.get("/workspaces/{workspace_id}/artifacts")
-def list_artifacts(workspace_id: str) -> list[dict]:
+def list_artifacts(workspace_id: str, user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         rows = db.execute(
             "SELECT * FROM workspace_artifacts WHERE workspace_id = ? ORDER BY created_at DESC",
             (workspace_id,)
@@ -610,9 +671,10 @@ def list_artifacts(workspace_id: str) -> list[dict]:
 
 
 @router.get("/workspaces/{workspace_id}/artifacts/{artifact_id}")
-def get_artifact(workspace_id: str, artifact_id: str) -> dict:
+def get_artifact(workspace_id: str, artifact_id: str, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         row = db.execute(
             "SELECT * FROM workspace_artifacts WHERE id = ? AND workspace_id = ?",
             (artifact_id, workspace_id)
@@ -631,18 +693,24 @@ class ArtifactGenerate(BaseModel):
 
 
 @router.post("/workspaces/{workspace_id}/generate", status_code=201)
-def generate_artifact(workspace_id: str, body: ArtifactGenerate) -> dict:
+def generate_artifact(workspace_id: str, body: ArtifactGenerate, user: CurrentUser) -> dict:
     # Runs the full pipeline with the right output_format + per-type directive +
     # injected workspace memory, and persists the artifact (Sections 7.1 & 9.1).
+    db = get_session_db()
+    try:
+        _require_workspace(db, workspace_id, user.id)
+    finally:
+        db.close()
     return generate_artifact_core(
         workspace_id, body.question, body.artifact_type, body.title
     )
 
 
 @router.delete("/workspaces/{workspace_id}/artifacts/{artifact_id}")
-def delete_artifact(workspace_id: str, artifact_id: str) -> dict:
+def delete_artifact(workspace_id: str, artifact_id: str, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         db.execute(
             "DELETE FROM workspace_artifacts WHERE id = ? AND workspace_id = ?",
             (artifact_id, workspace_id)
@@ -658,9 +726,10 @@ def delete_artifact(workspace_id: str, artifact_id: str) -> dict:
 # ==============================================================================
 
 @router.get("/workspaces/{workspace_id}/memory")
-def list_memory(workspace_id: str) -> list[dict]:
+def list_memory(workspace_id: str, user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         rows = db.execute(
             "SELECT * FROM project_memory WHERE workspace_id = ? ORDER BY last_used DESC",
             (workspace_id,)
@@ -677,10 +746,11 @@ class MemoryCreate(BaseModel):
 
 
 @router.post("/workspaces/{workspace_id}/memory", status_code=201)
-def add_memory(workspace_id: str, body: MemoryCreate) -> dict:
+def add_memory(workspace_id: str, body: MemoryCreate, user: CurrentUser) -> dict:
     mid = str(uuid.uuid4())
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         db.execute(
             "INSERT INTO project_memory (id, workspace_id, memory_type, key, value) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -694,9 +764,10 @@ def add_memory(workspace_id: str, body: MemoryCreate) -> dict:
 
 
 @router.delete("/workspaces/{workspace_id}/memory/{memory_id}")
-def delete_memory(workspace_id: str, memory_id: str) -> dict:
+def delete_memory(workspace_id: str, memory_id: str, user: CurrentUser) -> dict:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         db.execute(
             "DELETE FROM project_memory WHERE id = ? AND workspace_id = ?",
             (memory_id, workspace_id)
@@ -719,9 +790,10 @@ class WorkflowCreate(BaseModel):
 
 
 @router.get("/workspaces/{workspace_id}/workflows")
-def list_workflows(workspace_id: str) -> list[dict]:
+def list_workflows(workspace_id: str, user: CurrentUser) -> list[dict]:
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         rows = db.execute(
             "SELECT * FROM workflows WHERE workspace_id = ? ORDER BY name",
             (workspace_id,)
@@ -737,10 +809,11 @@ def list_workflows(workspace_id: str) -> list[dict]:
 
 
 @router.post("/workspaces/{workspace_id}/workflows", status_code=201)
-def create_workflow(workspace_id: str, body: WorkflowCreate) -> dict:
+def create_workflow(workspace_id: str, body: WorkflowCreate, user: CurrentUser) -> dict:
     wid = str(uuid.uuid4())
     db = get_session_db()
     try:
+        _require_workspace(db, workspace_id, user.id)
         db.execute(
             "INSERT INTO workflows (id, workspace_id, name, trigger_type, schedule_cron, steps) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -757,7 +830,12 @@ def create_workflow(workspace_id: str, body: WorkflowCreate) -> dict:
 
 
 @router.post("/workspaces/{workspace_id}/workflows/{workflow_id}/run")
-def run_workflow(workspace_id: str, workflow_id: str) -> dict:
+def run_workflow(workspace_id: str, workflow_id: str, user: CurrentUser) -> dict:
+    db = get_session_db()
+    try:
+        _require_workspace(db, workspace_id, user.id)
+    finally:
+        db.close()
     result = execute_workflow(workspace_id, workflow_id)
     if not result.get("ok") and result.get("error") == "Workflow not found":
         raise HTTPException(404, "Workflow not found")
