@@ -6,7 +6,10 @@ const nextConfig = {
   // origin (e.g. a Cloudflare tunnel) with no CORS and no second exposed port.
   async rewrites() {
     const target = process.env.API_PROXY_TARGET || "http://localhost:8000";
-    return [{ source: "/api/:path*", destination: `${target}/:path*` }];
+    // Proxy everything under /api/* to the backend EXCEPT NextAuth's /api/auth/*, which
+    // is a dynamic (catch-all) route handled locally. Array-form rewrites run before
+    // dynamic routes, so without this exclusion /api/auth/* would be proxied and 404.
+    return [{ source: "/api/:path((?!auth).*)", destination: `${target}/:path` }];
   },
 };
 module.exports = nextConfig;

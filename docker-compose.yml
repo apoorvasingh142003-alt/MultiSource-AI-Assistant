@@ -35,6 +35,10 @@ services:
       # running on the host (see extra_hosts below); override either via .env.
       ABA_LOCAL_BASE_URL: ${ABA_LOCAL_BASE_URL:-http://host.docker.internal:11434/v1}
       ABA_LOCAL_MODEL: ${ABA_LOCAL_MODEL:-qwen2.5:7b-instruct}
+      # Auth & multi-tenancy. When enabled, every user-owned route requires a valid
+      # identity JWT (minted by the UI's NextAuth layer, verified with the shared secret).
+      ABA_AUTH_ENABLED: ${ABA_AUTH_ENABLED:-false}
+      ABA_AUTH_SECRET: ${ABA_AUTH_SECRET:-}
     extra_hosts:
       # Map host.docker.internal -> the host gateway so the container can reach
       # a locally-running Ollama (compose doesn't add this automatically).
@@ -61,8 +65,18 @@ services:
       args:
         # The Next server proxies /api/* to the API service (single public origin, no CORS).
         API_PROXY_TARGET: http://api:8000
+        # Build-time (client-inlined): gate the app behind Google sign-in.
+        NEXT_PUBLIC_AUTH_ENABLED: ${NEXT_PUBLIC_AUTH_ENABLED:-false}
     environment:
       API_PROXY_TARGET: http://api:8000
+      # NextAuth (server-side, runtime). NEXTAUTH_URL must be the public origin so the
+      # Google OAuth callback resolves; secrets are read from .env (never committed).
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://assistant.lazysnail.xyz}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Shared with the API to sign the identity JWT the backend verifies.
+      ABA_AUTH_SECRET: ${ABA_AUTH_SECRET:-}
     ports:
       - "3000:3000"
     depends_on:
