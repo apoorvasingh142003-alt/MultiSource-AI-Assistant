@@ -280,6 +280,22 @@ export async function importSheet(url: string): Promise<SheetImportResult> {
   return postJSON<SheetImportResult>("/sheets/import", { url });
 }
 
+/* ---- HubSpot CRM ---- */
+export interface HubSpotStatus { connected: boolean }
+export interface HubSpotImport { ok: boolean; imported: Record<string, number>; status: string }
+export async function hubspotStatus(): Promise<HubSpotStatus> {
+  return getJSON<HubSpotStatus>("/hubspot/status");
+}
+export async function hubspotConnect(token: string): Promise<HubSpotImport> {
+  return postJSON<HubSpotImport>("/hubspot/connect", { token });
+}
+export async function hubspotSync(): Promise<HubSpotImport> {
+  return postJSON<HubSpotImport>("/hubspot/sync", {});
+}
+export async function hubspotDisconnect(): Promise<void> {
+  await postJSON("/hubspot/disconnect", {});
+}
+
 /* ---- workspaces (Section 7) ---- */
 export async function fetchWorkspaces(): Promise<Workspace[]> {
   return getJSON<Workspace[]>("/workspaces");

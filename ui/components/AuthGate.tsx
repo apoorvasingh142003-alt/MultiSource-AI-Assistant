@@ -2,6 +2,7 @@
 import { signIn, signOut, useSession } from "next-auth/react";
 import TelegramConnect from "@/components/TelegramConnect";
 import SheetsConnect from "@/components/SheetsConnect";
+import HubSpotConnect from "@/components/HubSpotConnect";
 
 // When auth is disabled (dev/single-tenant) this is a passthrough. When enabled, it gates
 // the whole app behind Google sign-in and shows a compact signed-in chip with sign-out.
@@ -63,6 +64,7 @@ function Gate({ children }: { children: React.ReactNode }) {
           {user?.email}
         </span>
         <SheetsConnect />
+        <HubSpotConnect />
         <TelegramConnect />
         <button
           onClick={() => signOut()}

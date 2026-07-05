@@ -20,6 +20,7 @@ from app.artifacts import generate_artifact_core
 from app.auth import CurrentUser
 from app.channels import telegram as tg
 from app.integrations import google_sheets as gsheets
+from app.integrations import hubspot as hs
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
@@ -907,3 +908,42 @@ def sheets_import(
         return gsheets.import_sheet_for_user(user.id, x_google_access_token, body.url)
     except gsheets.SheetsError as exc:
         raise HTTPException(400, str(exc))
+
+
+# ==============================================================================
+# HubSpot CRM (per-tenant, via a Private App token)
+# ==============================================================================
+
+class HubSpotConnect(BaseModel):
+    token: str
+
+
+@router.post("/hubspot/connect")
+def hubspot_connect(body: HubSpotConnect, user: CurrentUser) -> dict:
+    """Validate + store the caller's HubSpot token and import their CRM objects."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(400, "Paste your HubSpot Private App access token.")
+    try:
+        return hs.connect_and_import(user.id, token)
+    except hs.HubSpotError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/hubspot/status")
+def hubspot_status(user: CurrentUser) -> dict:
+    return hs.status(user.id)
+
+
+@router.post("/hubspot/sync")
+def hubspot_sync(user: CurrentUser) -> dict:
+    try:
+        return hs.resync(user.id)
+    except hs.HubSpotError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/hubspot/disconnect")
+def hubspot_disconnect(user: CurrentUser) -> dict:
+    hs.delete_token(user.id)
+    return {"ok": True}

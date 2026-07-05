@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS channel_link_codes (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL
 );
+
+-- Per-user credentials for third-party integrations (HubSpot private-app token, etc.).
+CREATE TABLE IF NOT EXISTS integration_tokens (
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,               -- 'hubspot' | ...
+    token TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, provider)
+);
 """
 
 
