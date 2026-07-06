@@ -75,11 +75,35 @@ for the optional iterative agent. Bump the model via `ABA_LOCAL_MODEL` (e.g.
 
 ---
 
-# Next Round (PLANNED — not yet built) — Enterprise Multi-Tenant Platform + Channels & CRM
+# Enterprise Multi-Tenant Platform + Channels & CRM
 
-**Status:** design locked with user 2026-07-05; implementation not started. Scoped via a
-requirements discussion; all decisions below are confirmed. Target: **full enterprise-grade
-wherever possible**, portable to cloud but runnable today on the local Docker stack.
+**Status (2026-07-06): SHIPPED** on `enterprise-upgrade` and live at `assistant.lazysnail.xyz`.
+Delivered incrementally, each with tests (suite: 143 passed, 10 skipped):
+
+- **Permanent URL** — Cloudflare Named Tunnel → `assistant.lazysnail.xyz` (`scripts/tunnel.sh`).
+- **Auth + multi-tenancy** — Google sign-in (NextAuth, published), per-user `user_id` scoping on
+  sessions/workspaces with ownership guards, HS256 identity JWT bridged from the Next middleware
+  to the FastAPI `get_current_user` dependency (`app/auth.py`).
+- **Per-tenant document isolation** — `get_engine(user_id)` gives each tenant its own engine;
+  uploads/retrieval private, sample corpus shared.
+- **Durability** — tenant state + uploads on persistent volumes (`data/state/`, `aba_uploads`).
+- **Channels (two-way, shared bot/number + one-time link code):** **Telegram** (webhook auto-
+  registered) and **WhatsApp** (Meta Cloud API; free-form replies inside the 24h window — no
+  templates needed). Both run the sender's isolated engine and store chats as sessions.
+- **CRM/Sheets as grounded sources:** **Google Sheets** (incremental OAuth for the Sheets scope +
+  token auto-refresh) and **HubSpot** (per-user Private App token) — both materialised into the
+  tenant's engine as queryable tables.
+
+Remaining/optional: WhatsApp Meta credentials wiring (awaiting user's Meta setup); make integration
+imports auto-restore on restart; per-tenant LLM/embedding cache; move tenant store to Postgres for
+always-on cloud. Original design notes below.
+
+---
+
+## Original design notes (as scoped 2026-07-05)
+
+Target: **full enterprise-grade wherever possible**, portable to cloud but runnable today on the
+local Docker stack.
 
 ## N0. Objectives
 

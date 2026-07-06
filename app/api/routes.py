@@ -19,6 +19,7 @@ from app import runtime
 from app.artifacts import generate_artifact_core
 from app.auth import CurrentUser
 from app.channels import telegram as tg
+from app.channels import whatsapp as wa
 from app.integrations import google_sheets as gsheets
 from app.integrations import hubspot as hs
 from app.config import get_settings
@@ -946,4 +947,46 @@ def hubspot_sync(user: CurrentUser) -> dict:
 @router.post("/hubspot/disconnect")
 def hubspot_disconnect(user: CurrentUser) -> dict:
     hs.delete_token(user.id)
+    return {"ok": True}
+
+
+# ==============================================================================
+# WhatsApp channel (two-way; Meta Cloud API; shared number + link code)
+# ==============================================================================
+
+@router.get("/whatsapp/webhook")
+async def whatsapp_verify(request: Request):
+    """Meta's GET verification handshake when the webhook is registered."""
+    from fastapi.responses import PlainTextResponse
+    q = request.query_params
+    challenge = wa.verify_webhook(q.get("hub.mode"), q.get("hub.verify_token"), q.get("hub.challenge"))
+    if challenge is None:
+        raise HTTPException(403, "Verification failed.")
+    return PlainTextResponse(challenge)
+
+
+@router.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request) -> dict:
+    """Inbound messages from Meta. Processed off-thread so we ACK immediately."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Malformed payload.")
+    threading.Thread(target=wa.handle_webhook, args=(payload,), daemon=True).start()
+    return {"ok": True}
+
+
+@router.post("/whatsapp/link")
+def whatsapp_link(user: CurrentUser) -> dict:
+    return wa.create_link_code(user.id)
+
+
+@router.get("/whatsapp/status")
+def whatsapp_status(user: CurrentUser) -> dict:
+    return wa.link_status(user.id)
+
+
+@router.post("/whatsapp/unlink")
+def whatsapp_unlink(user: CurrentUser) -> dict:
+    wa.unlink(user.id)
     return {"ok": True}

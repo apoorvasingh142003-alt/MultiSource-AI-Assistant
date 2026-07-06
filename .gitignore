@@ -41,3 +41,6 @@ context.md
 
 # Per-tenant runtime state (sessions/workspaces/users DB) — never committed.
 data/state/
+
+# Legacy runtime session DB (superseded by the gitignored data/state/ volume).
+data/sessions.db
