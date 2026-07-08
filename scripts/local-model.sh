@@ -49,22 +49,22 @@ cd "$PROJECT_DIR"
 log "Ensuring the app is running with the local-model config..."
 ABA_LOCAL_MODEL="$MODEL" docker compose up -d
 for _ in $(seq 1 30); do
-  curl -sf --max-time 2 http://localhost:8000/health >/dev/null 2>&1 && break; sleep 2
+  curl -sf --max-time 2 http://localhost:8010/health >/dev/null 2>&1 && break; sleep 2
 done
-curl -sf --max-time 2 http://localhost:8000/health >/dev/null 2>&1 || die "API did not become healthy."
+curl -sf --max-time 2 http://localhost:8010/health >/dev/null 2>&1 || die "API did not become healthy."
 
 # 4. Flip the running app into local mode (no restart needed).
 log "Switching the app to local-model mode..."
-curl -sf -X POST http://localhost:8000/runtime/model-mode \
+curl -sf -X POST http://localhost:8010/runtime/model-mode \
   -H 'Content-Type: application/json' -d '{"mode":"local"}' >/dev/null
 
 # 5. Smoke test — prove the local model actually answers.
 log "Smoke test (asking the local model a demo question)..."
-ANS=$(curl -s --max-time 180 -X POST http://localhost:8000/ask \
+ANS=$(curl -s --max-time 180 -X POST http://localhost:8010/ask \
   -H 'Content-Type: application/json' \
   -d '{"question":"How many customers are in the database?","scope":"demo"}' \
   | python3 -c "import sys,json;print((json.load(sys.stdin).get('answer') or '<no answer>')[:200])" 2>/dev/null || echo "<request failed>")
 log "Answer: ${ANS}"
 
-log "Status: $(curl -s http://localhost:8000/runtime/model-mode)"
-log "Ready.  UI: http://localhost:3000   ·   API: http://localhost:8000   ·   model: ${MODEL}"
+log "Status: $(curl -s http://localhost:8010/runtime/model-mode)"
+log "Ready.  UI: http://localhost:3000   ·   API: http://localhost:8010   ·   model: ${MODEL}"
