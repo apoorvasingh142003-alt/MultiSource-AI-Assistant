@@ -18,7 +18,10 @@ services:
       args:
         INSTALL_ML: "false"
     ports:
-      - "8000:8000"
+      # Host port for direct API access/debugging only — the UI and tunnel reach the API
+      # internally at api:8000 over the compose network, so this can be anything free.
+      # Defaults to 8010 to avoid clashing with a local Apache/XAMPP on 8000.
+      - "${ABA_API_HOST_PORT:-8010}:8000"
     environment:
       ABA_LLM_PROVIDER: ${ABA_LLM_PROVIDER:-anthropic}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
