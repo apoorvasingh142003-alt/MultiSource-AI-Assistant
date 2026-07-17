@@ -88,13 +88,29 @@ def _guard_session_access(session_id: str | None, user_id: str) -> None:
 
 @router.get("/health")
 def health() -> dict:
-    eng = get_engine()
-    return {
-        "status": "ok",
-        "documents": len(eng.document_source.documents),
-        "chunks": eng.document_source.index.n_chunks,
-        "tables": eng.relational_source.schema.table_names(),
+    """Liveness + readiness. NEVER 500s: on a cold start (engine still building) it reports
+    ``status: "warming"`` with HTTP 200 so the container stays healthy and the UI can show a
+    calm "warming up" state instead of an error. Once warm it returns the full corpus summary.
+    """
+    from app.readiness import get_status
+    status = get_status()
+    payload: dict = {
+        "status": "ok" if status["ready"] else "warming",
+        "ready": status["ready"],
+        "uptime_seconds": status["uptime_seconds"],
     }
+    try:
+        eng = get_engine()
+        payload.update({
+            "documents": len(eng.document_source.documents),
+            "chunks": eng.document_source.index.n_chunks,
+            "tables": eng.relational_source.schema.table_names(),
+        })
+    except Exception:  # engine not built yet / mid-build — liveness still OK
+        log.exception("health: engine not ready yet")
+        payload["status"] = "warming"
+        payload["ready"] = False
+    return payload
 
 
 @router.get("/config")

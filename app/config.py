@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     # Shared secret used to verify the short-lived identity JWT the Next.js auth layer
     # mints from the Google session (HS256). MUST match NEXTAUTH's ABA_AUTH_SECRET.
     auth_secret: str | None = Field(default=None, alias="ABA_AUTH_SECRET")
+    # Key material for encrypting secrets at rest (OAuth/provider tokens in the state DB).
+    # Optional: falls back to ABA_AUTH_SECRET, then a deterministic dev key (see app/crypto.py).
+    # Set this to a strong random value before any shared/cloud deployment.
+    encryption_key: str | None = Field(default=None, alias="ABA_ENCRYPTION_KEY")
     # Google OAuth client (used by the Next.js NextAuth layer; mirrored here for the
     # backend to optionally validate audience). Values injected via env, never committed.
     google_client_id: str | None = Field(default=None, alias="ABA_GOOGLE_CLIENT_ID")

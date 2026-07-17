@@ -3,14 +3,15 @@ import React from "react";
 import {
   ask, askStream, fetchConfig, fetchExamples, fetchInventory, fetchSources,
   fetchSessions, createSession, deleteSession, renameSession, fetchMessages,
-  editMessage, deleteMessage, regenerateMessage,
+  editMessage, deleteMessage, regenerateMessage, fetchHealth,
   ingestPdf, ingestSqlite, resetWorkspace,
   type AskScope, type AskOptions, type AgentStep,
 } from "@/lib/api";
 import type {
   AppConfig, AskResponse, ExampleQuestion, Inventory, Message, Session, SourceInfo,
 } from "@/lib/types";
-import { Icons, Tabs, Button, Card, EmptyState, cn } from "@/components/ui";
+import { Icons, Tabs, Button, Card, EmptyState, IconButton, cn } from "@/components/ui";
+import AccountMenu from "@/components/AccountMenu";
 import Workspace from "@/components/Workspace";
 import WorkspaceView from "@/components/WorkspaceView";
 import Inspector from "@/components/Inspector";
@@ -31,6 +32,8 @@ export default function Page() {
   const [, setSources] = React.useState<SourceInfo[]>([]);
   const [inventory, setInventory] = React.useState<Inventory | null>(null);
   const [connecting, setConnecting] = React.useState(true);
+  // "warming" → backend reachable but the engine is still building its index (cold start).
+  const [warming, setWarming] = React.useState(false);
 
   const [tab, setTab] = React.useState<TabId>("chat");
   const [input, setInput] = React.useState("");
@@ -78,10 +81,22 @@ export default function Page() {
     let tries = 0;
     const tick = async () => {
       try {
+        // /health never 500s. If the backend is reachable but still building its index on a
+        // cold start, it reports {ready:false} — we show a calm "warming up" banner and keep
+        // polling instead of erroring. Only an unreachable backend counts as "connecting".
+        const h = await fetchHealth();
+        if (cancelled) return;
+        setConnecting(false);
+        if (!h.ready) {
+          setWarming(true);
+          tries += 1;
+          if (tries < 120) setTimeout(tick, 700);
+          return;
+        }
+        setWarming(false);
         const c = await fetchConfig();
         if (cancelled) return;
         setConfig(c);
-        setConnecting(false);
         fetchExamples().then(setExamples).catch(() => {});
         fetchSources().then(setSources).catch(() => {});
         fetchInventory().then(setInventory).catch(() => {});
@@ -90,7 +105,8 @@ export default function Page() {
         if (cancelled) return;
         tries += 1;
         setConnecting(true);
-        if (tries < 80) setTimeout(tick, 700);
+        setWarming(false);
+        if (tries < 120) setTimeout(tick, 700);
       }
     };
     tick();
@@ -343,15 +359,15 @@ export default function Page() {
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* top app bar */}
-        <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/85 backdrop-blur-xl">
+        <header className="glass sticky top-0 z-20 border-b border-line">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+              <div className="bg-brand-gradient flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-glow">
                 <Icons.layers className="h-5 w-5" />
               </div>
               <div>
-                <h1 className="text-[15px] font-bold leading-tight text-slate-900">Nexus AI</h1>
-                <p className="text-[11px] leading-tight text-slate-400">Adaptive Multi-Domain Intelligence Agent</p>
+                <h1 className="text-[15px] font-bold leading-tight text-fg">Nexus AI</h1>
+                <p className="text-[11px] leading-tight text-faint">Adaptive Multi-Domain Intelligence Agent</p>
               </div>
             </div>
 
@@ -359,47 +375,42 @@ export default function Page() {
               <Tabs tabs={tabs} active={tab} onChange={setTab} />
             </div>
 
-            <div className="order-2 ml-auto flex items-center gap-1.5 sm:order-3">
-              <button onClick={() => setDark((d) => !d)}
-                title={dark ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50">
-                {dark ? (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
-                    <circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
-                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-                  </svg>
-                )}
-              </button>
-              <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Open settings"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 ring-1 ring-inset ring-slate-200 transition hover:bg-slate-50">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.2.61.78 1.05 1.51 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-                </svg>
-              </button>
-              {(settings.agentRole || settings.customSystemPrompt || settings.agentMode || settings.output !== "auto") && (
-                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">
-                  <Icons.spark className="h-3 w-3" />{settings.agentMode ? "Agent" : "Customized"}
-                </span>
-              )}
+            <div className="order-2 ml-auto flex items-center gap-2 sm:order-3">
               {config && (
-                <span className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
-                  <span className={cn("h-1.5 w-1.5 rounded-full", config.mode === "live" ? "bg-emerald-500" : "bg-amber-500")} />
+                <span className="hidden items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] font-medium text-muted ring-1 ring-inset ring-line sm:inline-flex">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", config.mode === "live" ? "bg-emerald-500 shadow-[0_0_0_3px] shadow-emerald-500/20" : "bg-amber-500")} />
                   {config.mode === "live" ? `Live · ${config.provider}` : "Offline"}
                 </span>
               )}
+              {(settings.agentRole || settings.customSystemPrompt || settings.agentMode || settings.output !== "auto") && (
+                <span className="inline-flex items-center gap-1 rounded-lg bg-accent-soft px-2 py-1.5 text-[11px] font-medium text-accent ring-1 ring-inset ring-accent/25">
+                  <Icons.spark className="h-3 w-3" />{settings.agentMode ? "Agent" : "Customized"}
+                </span>
+              )}
+              <IconButton onClick={() => setDark((d) => !d)} title={dark ? "Switch to light mode" : "Switch to dark mode"}>
+                {dark ? <Icons.sun className="h-4 w-4" /> : <Icons.moon className="h-4 w-4" />}
+              </IconButton>
+              <IconButton onClick={() => setSettingsOpen(true)} title="Settings">
+                <Icons.gear className="h-4 w-4" />
+              </IconButton>
+              <div className="ml-0.5"><AccountMenu /></div>
             </div>
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto">
           {connecting && (
-            <div className="mx-auto mt-4 flex max-w-3xl items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] text-slate-500 shadow-sm">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-indigo-500" />
+            <div className="mx-auto mt-4 flex max-w-3xl items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13px] text-muted shadow-sm">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-accent" />
               Connecting to the engine… (this can take a few seconds while it starts up)
+            </div>
+          )}
+
+          {!connecting && warming && (
+            <div className="mx-auto mt-4 flex max-w-3xl items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />
+              Warming up — building the knowledge index. This only happens on a cold start; your
+              first answer will be ready in a moment.
             </div>
           )}
 
@@ -417,7 +428,7 @@ export default function Page() {
                       <div className="flex flex-wrap justify-center gap-2 px-4 pb-5">
                         {examples.slice(0, 6).map((ex) => (
                           <button key={ex.question} onClick={() => run(ex.question)} title={ex.question}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] text-slate-600 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600">
+                            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-accent">
                             {ex.label || ex.question.slice(0, 40)}
                           </button>
                         ))}
@@ -435,23 +446,23 @@ export default function Page() {
 
               {/* composer */}
               <div className="sticky bottom-0 mt-4 pb-2">
-                <Card className="p-2.5 shadow-lg ring-1 ring-slate-200/60 transition focus-within:ring-indigo-300">
+                <Card className="p-2.5 shadow-lg ring-1 ring-line/60 transition focus-within:ring-accent/40">
                   <textarea
                     value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onComposerKey}
                     rows={2} placeholder="Message Nexus AI…"
-                    className="focus-ring max-h-40 w-full resize-y rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[15px] leading-relaxed text-slate-800 placeholder:text-slate-400" />
+                    className="focus-ring max-h-40 w-full resize-y rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-[15px] leading-relaxed text-fg placeholder:text-faint" />
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-                      {settings.agentMode && <span className="rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">Agent mode</span>}
-                      {settings.temperature > 0 && <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500">temp {settings.temperature.toFixed(1)}</span>}
+                    <span className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
+                      {settings.agentMode && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent ring-1 ring-inset ring-accent/25">Agent mode</span>}
+                      {settings.temperature > 0 && <span className="rounded bg-surface-2 px-1.5 py-0.5 font-medium text-muted ring-1 ring-inset ring-line">temp {settings.temperature.toFixed(1)}</span>}
                       <span className="hidden sm:inline">
-                        <kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Enter</kbd> to send ·
-                        <kbd className="ml-1 rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Shift</kbd>+<kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] font-medium text-slate-500">Enter</kbd> for newline
+                        <kbd className="rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Enter</kbd> to send ·
+                        <kbd className="ml-1 rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Shift</kbd>+<kbd className="rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Enter</kbd> for newline
                       </span>
                     </span>
-                    <Button size="md" onClick={() => run(input)} disabled={busy || !input.trim()}>
-                      {busy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Icons.arrowR className="h-4 w-4" />}
-                      {busy ? "Working…" : "Send"}
+                    <Button size="md" onClick={() => run(input)} disabled={busy || warming || !input.trim()}>
+                      {busy || warming ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Icons.send className="h-4 w-4" />}
+                      {warming ? "Warming…" : busy ? "Working…" : "Send"}
                     </Button>
                   </div>
                 </Card>
@@ -473,7 +484,7 @@ export default function Page() {
           {tab === "inspector" && <div className="px-5 py-6"><div className="mx-auto max-w-7xl"><Inspector resp={lastResp} /></div></div>}
         </main>
 
-        <footer className="px-5 pb-3 pt-1 text-center text-[11px] leading-relaxed text-slate-400">
+        <footer className="px-5 pb-3 pt-1 text-center text-[11px] leading-relaxed text-faint">
           PDF + SQLite · agentic chat · hybrid retrieval (dense + BM25 + RRF + rerank) · grounded generation ·
           citation verification · Ctrl+K new chat
         </footer>

@@ -43,6 +43,19 @@ async function deleteJSON(path: string): Promise<void> {
 }
 
 /* ---- bootstrap ---- */
+export interface Health {
+  status: "ok" | "warming";
+  ready: boolean;
+  uptime_seconds?: number;
+  documents?: number;
+  chunks?: number;
+  tables?: string[];
+}
+
+export async function fetchHealth(): Promise<Health> {
+  return getJSON<Health>("/health");
+}
+
 export async function fetchConfig(): Promise<AppConfig> {
   return getJSON<AppConfig>("/config");
 }

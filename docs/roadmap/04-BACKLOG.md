@@ -5,10 +5,13 @@ Check items off as done. Each task names the likely files.
 
 ## Phase 0 — Reliability floor
 
-- [ ] One-command bring-up documented + verified from cold (`scripts/start.sh` already exists —
-      confirm it works end-to-end, `/health` green).
-- [ ] Encrypt OAuth/provider tokens at rest in the state DB (`app/integrations/*`, `app/db/`).
-- [ ] Cold-start "warming up" UX instead of an error on first request.
+- [x] One-command bring-up documented + verified from cold (`scripts/start.sh`; `/health` green,
+      public link up). See [plans/00-RELIABILITY-plan.md](plans/00-RELIABILITY-plan.md).
+- [x] Encrypt OAuth/provider tokens at rest in the state DB — `app/crypto.py` (Fernet) wired into
+      `app/integrations/hubspot.py`; `integration_tokens.token` is now `enc:v1:…` ciphertext,
+      backward-compatible with legacy plaintext. Key: `ABA_ENCRYPTION_KEY` → `ABA_AUTH_SECRET` → dev.
+- [x] Cold-start "warming up" UX instead of an error on first request — `app/readiness.py` +
+      `/health` never-500 (`status: warming|ok`); UI shows a calm warming banner + gates the composer.
 - [ ] (On first real client) provision an always-on host + stable domain + HTTPS; document deploy.
 
 ## Phase 1 — Docling ingestion
