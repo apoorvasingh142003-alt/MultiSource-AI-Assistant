@@ -180,6 +180,44 @@ export interface AgentTrace {
   steps: AgentStepTrace[];
 }
 
+/* ---------------- deep research (Phase 4) ---------------- */
+export interface ResearchAction {
+  tool: string;                 // "search_documents" | "sql_query"
+  query: string;
+  found: number;
+  added: number;
+  documents?: string[];
+  reason?: string;
+}
+
+export interface ResearchVerdict {
+  sufficient: boolean;
+  coverage: number;
+  missing_terms: string[];
+  missing_aspects: string[];
+  missing_documents: string[];
+  next_queries: { query: string; reason?: string; documents?: string[] }[];
+  reasoning: string;
+  source: string;               // "heuristic" | "llm"
+}
+
+export interface ResearchRound {
+  round: number;
+  actions: ResearchAction[];
+  verdict?: ResearchVerdict | null;
+}
+
+export interface ResearchTrace {
+  question: string;
+  rounds: ResearchRound[];
+  total_rounds: number;
+  stop_reason: string;
+  documents_covered: string[];
+  target_documents?: string[] | null;
+  evidence_count: number;
+  duration_ms: number;
+}
+
 export interface Trace {
   question: string;
   languages: string[];
@@ -200,6 +238,45 @@ export interface Trace {
   generation_steps: GenerationStep[];
   multi_agent_trace?: MultiAgentTrace | null;
   agent_trace?: AgentTrace | null;
+  research_trace?: ResearchTrace | null;
+}
+
+/* ---------------- generative components (Phase 3) ---------------- */
+// A structured view over GROUNDED evidence the chat renders inline (cited table / chart /
+// timeline / clause artifact). Built deterministically on the backend from the same
+// evidence the wall verified — never for a reasoned/insufficient answer. Mirrors
+// app/models.py::AnswerComponent.
+export type ComponentKind = "table" | "chart" | "timeline" | "artifact";
+
+export interface TimelineEvent {
+  date: string;
+  title: string;
+  details?: string;
+}
+
+export interface ChartPoint {
+  label: string;
+  value: number;
+}
+
+export interface AnswerComponent {
+  kind: ComponentKind;
+  title: string;
+  caption?: string;
+  evidence_ids: string[];
+  // table
+  columns: string[];
+  rows: string[][];
+  // chart
+  chart_kind?: string;
+  x_label?: string;
+  y_label?: string;
+  points: ChartPoint[];
+  // timeline
+  events: TimelineEvent[];
+  // artifact
+  subtitle?: string;
+  body?: string;
 }
 
 export interface AskResponse {
@@ -208,12 +285,14 @@ export interface AskResponse {
   insufficient: boolean;
   answer_state?: AnswerState;
   citations: Evidence[];
+  components?: AnswerComponent[];
   trace: Trace;
   verification_warning?: string | null;
   hallucination_risk_score?: number | null;
   contradictions: ContradictionResult[];
   multi_agent_trace?: MultiAgentTrace | null;
   agent_trace?: AgentTrace | null;
+  research_trace?: ResearchTrace | null;
 }
 
 export interface ExampleQuestion {

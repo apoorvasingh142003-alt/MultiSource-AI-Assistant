@@ -178,6 +178,9 @@ class Trace(BaseModel):
     multi_agent_trace: Optional[dict[str, Any]] = None
     # Iterative LangGraph agent timeline (tool calls + observations), when agent_mode is on.
     agent_trace: Optional[dict[str, Any]] = None
+    # Deep-research timeline (Phase 4): retrieval rounds, sufficiency verdicts, stop
+    # reason — the visible record of the iterative search that produced the evidence.
+    research_trace: Optional[dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):
@@ -195,10 +198,49 @@ class AskRequest(BaseModel):
     output_format: Optional[str] = "auto"        # auto|prose|table|timeline_table|json|bullet_points|executive_summary
     multi_agent: bool = False                    # force multi-agent decomposition
     agent_mode: bool = False                     # force the LangGraph iterative agent
+    # Deep research (Phase 4): bounded retrieve → sufficiency-check → reformulate loop.
+    deep_research: bool = False
     temperature: Optional[float] = None          # generation temperature (None == deterministic)
     session_id: Optional[str] = None             # active chat session id
     # Optional explicit prior turns; when omitted the server loads them from session_id.
     conversation_history: Optional[list[dict[str, Any]]] = None
+
+
+class AnswerComponent(BaseModel):
+    """A generative UI component the frontend renders inline beside the answer text —
+    a cited table, chart, timeline, or document/clause artifact (Phase 3).
+
+    Components are computed *deterministically from the trace* (SQL rows, retrieved
+    passages) — never invented by the model — and are only ever built for a GROUNDED
+    answer, so a chart/table/timeline can never lend confident structure to reasoned or
+    insufficient output. This keeps the tri-state grounding wall intact: structure is a
+    view over grounded evidence, not a new, unlabelled answer stream.
+
+    ``evidence_ids`` link every component back to the exact ``Evidence`` it was built
+    from, so a click on the component opens the same cited evidence in the inspector.
+    """
+
+    kind: Literal["table", "chart", "timeline", "artifact"]
+    title: str = ""
+    subtitle: str = ""                               # secondary line (e.g. an artifact's source label)
+    caption: str = ""                                # short provenance line ("12 rows from invoices")
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    # table payload
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+    # chart
+    chart_kind: str = "bar"                           # currently "bar"
+    x_label: str = ""                                 # category axis label
+    y_label: str = ""                                 # numeric axis label
+    points: list[dict[str, Any]] = Field(default_factory=list)  # [{label, value}]
+
+    # timeline
+    events: list[dict[str, Any]] = Field(default_factory=list)  # [{date, title, details}]
+
+    # artifact (a quoted document clause / section)
+    body: str = ""
 
 
 class AskResponse(BaseModel):
@@ -210,6 +252,9 @@ class AskResponse(BaseModel):
     # three states blend. "grounded" is the default; the engine overwrites it per answer.
     answer_state: AnswerState = "grounded"
     citations: list[Evidence] = Field(default_factory=list)
+    # Generative UI components (Phase 3) — deterministic views over the grounded evidence
+    # (cited table / chart / timeline / clause artifact). Empty for reasoned/insufficient.
+    components: list[AnswerComponent] = Field(default_factory=list)
     trace: Trace
     # --- new fields (Sections 8, 10) ---
     verification_warning: Optional[str] = None
@@ -217,6 +262,7 @@ class AskResponse(BaseModel):
     contradictions: list[dict[str, Any]] = Field(default_factory=list)
     multi_agent_trace: Optional[dict[str, Any]] = None
     agent_trace: Optional[dict[str, Any]] = None
+    research_trace: Optional[dict[str, Any]] = None
 
 
 # Markers a reasoned (non-grounded) answer carries. Kept in sync with the disclaimers

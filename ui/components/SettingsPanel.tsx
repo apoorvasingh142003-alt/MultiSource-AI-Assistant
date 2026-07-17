@@ -115,6 +115,8 @@ export default function SettingsPanel({
 
             {/* Reasoning toggles */}
             <div className="grid grid-cols-2 gap-2">
+              <Toggle label="Deep research" hint="Iterate retrieval until sufficient" checked={settings.deepResearch}
+                onChange={(v) => onUpdate({ deepResearch: v })} />
               <Toggle label="Agent mode" hint="Iterative tool use" checked={settings.agentMode}
                 onChange={(v) => onUpdate({ agentMode: v })} />
               <Toggle label="Multi-agent" hint="Decompose + synthesize" checked={settings.multiAgent}

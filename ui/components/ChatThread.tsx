@@ -1,12 +1,13 @@
 "use client";
 import React from "react";
 import type { AskResponse } from "@/lib/types";
-import type { AgentStep } from "@/lib/api";
+import type { AgentStep, ResearchStep } from "@/lib/api";
 import { Icons, RouteBadge, cn } from "./ui";
 import { CitedText, CitationChips } from "./trace";
-import { segmentAnswer } from "@/lib/tableParser";
+import { segmentAnswer, stripMarkdownTables } from "@/lib/tableParser";
 import AnswerTable from "./AnswerTable";
 import AnswerStateChip from "./AnswerStateChip";
+import GenerativeComponents from "./GenerativeComponents";
 import type { InspectorTab } from "./InspectorPanel";
 
 export interface ChatTurn {
@@ -20,6 +21,7 @@ export interface ChatTurn {
   streaming?: boolean;
   streamingText?: string;
   agentSteps?: AgentStep[];
+  researchSteps?: ResearchStep[];
   edited?: boolean;
   error?: string | null;
   system?: boolean;              // system note (e.g. "uploaded X") — not a Q/A turn
@@ -191,7 +193,13 @@ function AssistantAnswer({
   onRegenerate: (turn: ChatTurn) => void;
 }) {
   const rtl = /[֐-׿]/.test(resp.answer);
-  const segments = segmentAnswer(resp.answer);
+  const components = resp.components ?? [];
+  // When the backend already emits a structured (cited) table component, don't ALSO render
+  // the model's inline markdown table — the structured one is authoritative and cited.
+  const hasStructuredTable = components.some((c) => c.kind === "table");
+  const segments = hasStructuredTable
+    ? [{ type: "text" as const, content: stripMarkdownTables(resp.answer) }]
+    : segmentAnswer(resp.answer);
   const hasTables = segments.some((s) => s.type === "table");
 
   return (
@@ -226,6 +234,15 @@ function AssistantAnswer({
         </div>
       ) : (
         <CitedText text={resp.answer} onCite={(id) => onCite(turn, id)} rtl={rtl} />
+      )}
+
+      {/* generative components — cited table / chart / timeline / clause artifact.
+          Grounded-only (the backend never emits them for reasoned/insufficient). */}
+      {components.length > 0 && (
+        <GenerativeComponents
+          components={components} citations={resp.citations}
+          onCite={(id) => onCite(turn, id)} onInspect={() => onInspect(turn, "answer")}
+        />
       )}
 
       {/* source chips */}
@@ -266,10 +283,65 @@ function ActionBtn({ icon, label, onClick, disabled, active }: {
   );
 }
 
+/* One live deep-research progress line (Phase 4): search → assess → done, per round. */
+function ResearchStepLine({ s }: { s: ResearchStep }) {
+  if (s.kind === "start") {
+    return (
+      <div className="flex items-center gap-2 text-[12px] text-body">
+        <Icons.search className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <span className="text-muted">Deep research started — up to {s.max_rounds} rounds over {s.documents_in_scope} document(s)</span>
+      </div>
+    );
+  }
+  if (s.kind === "search") {
+    return (
+      <div className="flex items-center gap-2 text-[12px] text-body">
+        <span className="rounded bg-accent-soft px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent ring-1 ring-inset ring-accent/25">{s.round}</span>
+        <span className="font-mono text-[11px] text-accent">{s.tool === "sql_query" ? "sql" : "search"}</span>
+        <span className="truncate text-muted">
+          “{s.query}”{s.documents?.length ? ` in ${s.documents.join(", ")}` : ""} → {s.added} new
+        </span>
+      </div>
+    );
+  }
+  if (s.kind === "assess") {
+    return (
+      <div className="flex items-center gap-2 text-[12px]">
+        <span className="rounded bg-accent-soft px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent ring-1 ring-inset ring-accent/25">{s.round}</span>
+        <span className={cn("font-medium", s.sufficient ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+          {s.sufficient ? "evidence sufficient" : "needs more"}
+        </span>
+        <span className="truncate text-muted">
+          coverage {Math.round((s.coverage ?? 0) * 100)}%
+          {!s.sufficient && !!s.missing_terms?.length && ` · missing: ${s.missing_terms.slice(0, 4).join(", ")}`}
+        </span>
+      </div>
+    );
+  }
+  if (s.kind === "done") {
+    return (
+      <div className="flex items-center gap-2 text-[12px] text-muted">
+        <Icons.check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+        {s.rounds} round(s) · {s.evidence} evidence item(s) from {s.documents} document(s)
+      </div>
+    );
+  }
+  return null;
+}
+
 function StreamingAssistant({ turn }: { turn: ChatTurn }) {
   const steps = turn.agentSteps ?? [];
+  const research = turn.researchSteps ?? [];
   return (
     <div className="space-y-3">
+      {research.length > 0 && (
+        <div className="space-y-1.5 rounded-xl bg-surface-2 p-3 ring-1 ring-inset ring-line">
+          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-accent">
+            <Icons.search className="h-3.5 w-3.5" />Deep research
+          </div>
+          {research.map((s, i) => <ResearchStepLine key={i} s={s} />)}
+        </div>
+      )}
       {steps.length > 0 && (
         <div className="space-y-1.5 rounded-xl bg-surface-2 p-3 ring-1 ring-inset ring-line">
           <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-accent">
@@ -288,7 +360,9 @@ function StreamingAssistant({ turn }: { turn: ChatTurn }) {
       )}
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-accent">
         <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-        {steps.length > 0 ? "Composing answer" : "Thinking"}
+        {steps.length > 0 || research.some((s) => s.kind === "done")
+          ? "Composing answer"
+          : research.length > 0 ? "Researching" : "Thinking"}
       </div>
       {turn.streamingText ? (
         <p className="whitespace-pre-wrap text-[15px] leading-[1.75] text-body">

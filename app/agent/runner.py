@@ -35,7 +35,8 @@ _AGENT_PREAMBLE = (
     "tools cannot supply enough evidence, say so honestly rather than guessing."
 )
 
-_RECURSION_LIMIT = 14  # ~6 tool rounds (agent+tools = 2 supersteps each) + final answer
+_RECURSION_LIMIT = 20  # ~6 tool rounds (agent+tools = 2 supersteps each) + final answer
+                       # + headroom for the sufficiency gate's bounded loop-back (Phase 4)
 
 
 def agent_available() -> bool:
@@ -96,7 +97,7 @@ def run_agent(orch, question: str,
                 + _history_messages(conversation_history)
                 + [HumanMessage(content=question)])
 
-    graph = build_agent_graph(ctx, s.model_generation, s, temperature)
+    graph = build_agent_graph(ctx, s.model_generation, s, temperature, question=question)
 
     agent_calls: list[LLMCall] = []
     final_answer = ""
@@ -140,6 +141,13 @@ def run_agent(orch, question: str,
                                 })
                         elif isinstance(m.content, str) and m.content.strip():
                             final_answer = m.content.strip()
+                    elif isinstance(m, HumanMessage):
+                        # sufficiency-gate steering (Phase 4): the graph decided the
+                        # evidence is not yet enough and sent the agent back for more.
+                        _emit("agent_observation", {
+                            "tool": "sufficiency_check",
+                            "summary": (getattr(m, "content", "") or "")[:400],
+                        })
                     else:  # ToolMessage observation
                         obs = getattr(m, "content", "")
                         _emit("agent_observation", {

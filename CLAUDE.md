@@ -84,6 +84,15 @@ suite runs deterministically without a key or auth.
 **citation verification** (`app/generation/verify.py`: every `[eN]` in the answer must trace to retrieved evidence).
 Everything is recorded into a single `Trace` (`app/models.py`) that every UI panel renders.
 
+- **Generative components (Phase 3)** (`app/generation/components.py`): after the label is
+  computed, `Engine._finalize` derives a deterministic `AskResponse.components` list (cited
+  **table** from the primary SQL result, SVG **bar chart**, **timeline**, document/clause
+  **artifact**) from the *same* trace evidence — no LLM call. `app/retrieval/intent.py::detect_component_intent`
+  picks chart/timeline/table from the question. Gated on `answer_state == "grounded"`: a
+  reasoned/insufficient answer never renders a confident-looking chart (the wall holds). The
+  UI renders them under the streamed prose (`ui/components/GenerativeComponents.tsx`), and a
+  present structured table suppresses the model's inline markdown table (the cited one wins).
+
 - **Document branch** (`app/retrieval/`): dense embeddings + BM25 → RRF fusion (`fusion.py`) →
   optional cross-encoder rerank (`rerank.py`) → semantic keep-ratio gate. `document_retriever.py`
   owns the hybrid `DocumentIndex`; `vector_store.py` has numpy (default) + Qdrant backends.
@@ -105,13 +114,29 @@ Everything is recorded into a single `Trace` (`app/models.py`) that every UI pan
 router builds its capability brief from `describe()` — adding a source is a new implementation,
 not a pipeline change.
 
-### Two generation paths, one Trace shape
+### Generation paths, one Trace shape
 Besides the classic orchestrator, `app/agent/` is a **LangGraph iterative agent** (tools:
 `sql_query`, `search_documents`) used only when a live OpenAI-compatible LLM is configured
 (`agent_available()`); `runner.py` reconstructs the *same* `Trace` (route, evidence, sql, doc
 retrieval) and runs the same verification, so the UI is unchanged. `app/multi_agent.py`
 decomposes multi-part questions into 2–4 sub-questions, runs the full pipeline per sub-question
 concurrently, then synthesizes — exposing a `multi_agent_trace`.
+
+- **Deep research (Phase 4)** (`app/agent/research.py` + `app/agent/sufficiency.py`): the
+  headline agentic loop — retrieve → **sufficiency check** → reformulate / target gaps →
+  repeat (bounded) → answer. Provider-agnostic and offline-deterministic (unlike the
+  LangGraph agent): control flow is code; the sufficiency check has a deterministic core
+  (term coverage with inflection tolerance, multi-aspect splitting, corpus-spread — "across
+  all contracts" requires evidence from ≥ `research_spread_min_docs` documents) refined by
+  the LLM when live. Triggered by `AskRequest.deep_research` (composer "Deep research"
+  chip). Bounds via `ABA_RESEARCH_*` (rounds, queries/round, time budget, evidence cap).
+  Each round streams a `research_step` SSE event (live timeline in `ChatThread.tsx`) and
+  the whole search persists as additive `Trace.research_trace`/`AskResponse.research_trace`
+  (inspector Trace tab panel in `Inspector.tsx`). The wall holds: an off-topic-evidence or
+  empty run falls back to the classic grounding-first path (honest decline), and the final
+  answer goes through the same `generate_answer` → `verify_citations` chokepoints. The
+  LangGraph graph also gained a **sufficiency node** (`graph.py`) that steers the agent
+  back for one bounded extra round when its evidence looks insufficient.
 
 ### Engine, tenancy, and state
 - `app/engine.py`: `Engine` wires sources + orchestrator. **One Engine per tenant** —

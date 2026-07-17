@@ -56,23 +56,55 @@ user-visible gain, and the library isn't a locked decision (the exit criteria ar
 
 ## Phase 3 — Tri-state answers + generative components
 
-- [ ] Prominent tri-state label component (grounded+cited / reasoned-advice / insufficient) —
-      never a calm/positive state for ungrounded. (Extend `VerificationBadge.tsx`.)
-- [ ] Clickable citations → highlight evidence in the panel.
-- [ ] Generative UI tools (AI SDK) → React components, streamed:
-  - [ ] Cited **table** from SQL rows + copy/export (extend `AnswerTable.tsx`).
-  - [ ] **Chart** (Recharts/Tremor).
-  - [ ] **Timeline**.
-  - [ ] **Document/clause artifact** in the side panel.
-- [ ] Intent → component selection (extend `app/retrieval/intent.py`).
+See [plans/03-COMPONENTS-plan.md](plans/03-COMPONENTS-plan.md). **Stack note (consistent with
+Phase 2):** components ride the existing custom-SSE `done` payload as a new
+`AskResponse.components` array (no Vercel AI SDK data-stream protocol); charts/timelines are
+self-contained SVG (no Recharts/Tremor dep). Components are built **deterministically** from
+the trace's SQL rows / evidence in the one `Engine._finalize` chokepoint, **grounded-only** —
+so the wall is never dressed up as a confident chart, and every path gets them for free.
+
+- [x] Prominent tri-state label component (grounded+cited / reasoned-advice / insufficient) —
+      never a calm/positive state for ungrounded. Shipped in Phase 2 (`AnswerStateChip.tsx` on
+      every message + full `AnswerStateBanner.tsx` in the inspector, driven by backend
+      `answer_state`); verified prominent + wall-safe this phase.
+- [x] Clickable citations → highlight evidence in the panel (`[eN]` in prose AND on every
+      component's cited-footer → `openCitation` → inspector scroll + `cite-pulse`).
+- [x] Generative UI tools → React components, rendered under the streamed prose:
+  - [x] Cited **table** from SQL rows + copy/export — `AnswerComponent(kind="table")` from the
+        primary SQL execution, rendered via `AnswerTable.tsx` (sort/paginate/CSV/TSV) with a
+        cited footer. Suppresses the model's duplicate markdown table.
+  - [x] **Chart** — self-contained SVG bar chart (`GenerativeComponents.tsx`), no chart lib.
+  - [x] **Timeline** — self-contained vertical SVG-accented timeline, chronological.
+  - [x] **Document/clause artifact** — verbatim top cited passage in a titled card.
+- [x] Intent → component selection (`app/retrieval/intent.py::detect_component_intent` +
+      `app/generation/components.py::build_components`). A false cue never invents a component —
+      one is emitted only when the trace actually has the data to back it.
 
 ## Phase 4 — Agentic iterative retrieval
 
-- [ ] Sufficiency-check node in the LangGraph agent (`app/agent/graph.py`): "does current
-      evidence answer the question?" → continue/stop.
-- [ ] Query reformulation / expansion loop; bounded rounds + latency cap.
-- [ ] Stream iteration steps into the trace panel (`app/agent/runner.py` → trace timeline).
-- [ ] Eval: multi-hop + evidence-spread-across-docs cases with ground-truth citations.
+See [plans/04-DEEP-RESEARCH-plan.md](plans/04-DEEP-RESEARCH-plan.md). **Design note:** the
+headline loop is a provider-agnostic controller (`app/agent/research.py`) — the LangGraph
+agent requires an OpenAI-compatible endpoint, so a LangGraph-only loop would be invisible
+on the Anthropic/offline deployments; the LangGraph path additionally got the same gate.
+
+- [x] Sufficiency check — `app/agent/sufficiency.py`: deterministic core (term coverage
+      with inflection tolerance, multi-aspect splitting, corpus-spread requirement) +
+      live LLM refinement with heuristic fallback. Wired as a real **sufficiency node**
+      in the LangGraph graph (`app/agent/graph.py`, bounded loop-back steering) AND as
+      the gate of the deep-research controller.
+- [x] Query reformulation / expansion loop; bounded rounds + latency cap —
+      `app/agent/research.py::run_deep_research` (uncovered-aspect queries, missing-term
+      queries, per-document targeting for "across all X"; `ABA_RESEARCH_*` knobs:
+      max rounds, queries/round, time budget, evidence cap). Off-topic relevance gate →
+      classic grounding-first fallback (the tri-state wall holds).
+- [x] Stream iteration steps into the trace panel — `research_step` SSE events render a
+      live round-by-round timeline while streaming (`ChatThread.tsx`), and the persisted
+      `research_trace` renders as a "Deep research" panel in the inspector Trace tab
+      (`Inspector.tsx`). Toggled per-chat via the composer's "Deep research" chip.
+- [x] Eval: multi-hop + evidence-spread-across-docs cases — `scripts/eval.py` Phase-4
+      block (the spread question must iterate ≥2 rounds and ground + verify citations
+      across ≥4 documents; an out-of-scope deep-research question must still decline)
+      + `tests/test_deep_research.py`.
 
 ## Phase 5 — Reasoning / design mode
 

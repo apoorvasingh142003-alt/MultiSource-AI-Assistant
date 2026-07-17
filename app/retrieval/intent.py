@@ -207,3 +207,40 @@ def text_hits(text: str, gate_terms: list[str]) -> bool:
         return False
     low = (text or "").lower()
     return any(t.lower() in low for t in gate_terms)
+
+
+# --- Generative-component intent (Phase 3) -----------------------------------
+# Deterministic cue detection that picks which inline component (chart / timeline /
+# table) a question is asking for. Fully offline, embedding-independent — the same
+# floor the rest of this module provides. The engine still only *builds* a component
+# when the trace actually has the data for it (grounded SQL rows / dated passages), so
+# a false-positive cue never manufactures a component out of nothing.
+_CHART_CUE = re.compile(
+    r"\b(chart|charts|graph|graphs|plot|plots|bar\s*chart|visuali[sz]e|visuali[sz]ation|"
+    r"compare|comparison|breakdown|distribution|by\s+(?:customer|category|month|industry|status|type))\b",
+    re.I,
+)
+_TIMELINE_CUE = re.compile(
+    r"\b(timeline|time\s*line|chronolog\w*|over\s+time|expir\w*|schedule|roadmap|"
+    r"upcoming|due\s+dates?|milestones?|history\s+of|sequence\s+of)\b",
+    re.I,
+)
+_TABLE_CUE = re.compile(
+    r"\b(table|tabular|list\s+all|show\s+all|breakdown|per\s+\w+|by\s+\w+|"
+    r"how\s+many|total|sum|count|amount|overdue|outstanding|invoices?|per\s+customer)\b",
+    re.I,
+)
+
+
+def detect_component_intent(query: str) -> str:
+    """Which generative component the question is asking for — "chart", "timeline",
+    "table", or "" (none). A visual cue (chart/timeline) wins over a plain table cue,
+    since those questions almost always also want the underlying rows shown too."""
+    q = query or ""
+    if _CHART_CUE.search(q):
+        return "chart"
+    if _TIMELINE_CUE.search(q):
+        return "timeline"
+    if _TABLE_CUE.search(q):
+        return "table"
+    return ""

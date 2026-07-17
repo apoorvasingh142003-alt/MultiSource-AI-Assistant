@@ -163,6 +163,16 @@ body {
 }
 .fade-up { animation: fade-up 0.32s ease-out both; }
 
+/* Bar chart grow-in (generative chart component) */
+@keyframes bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.bar-grow {
+  transform-origin: left center;
+  animation: bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .panel-transition { transition: all 200ms ease-in-out; }
 
 /* Indeterminate progress bar for ingestion */

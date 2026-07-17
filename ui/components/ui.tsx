@@ -52,6 +52,8 @@ export const Icons = {
   link: (p: IconProps) => <S {...p}><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></S>,
   sidebar: (p: IconProps) => <S {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></S>,
   copy: (p: IconProps) => <S {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></S>,
+  chart: (p: IconProps) => <S {...p}><path d="M4 20V4M4 20h16" /><rect x="7" y="11" width="3" height="6" rx="0.5" /><rect x="12" y="7" width="3" height="10" rx="0.5" /><rect x="17" y="13" width="3" height="4" rx="0.5" /></S>,
+  timeline: (p: IconProps) => <S {...p}><path d="M6 3v18" /><circle cx="6" cy="7" r="1.6" /><circle cx="6" cy="13" r="1.6" /><circle cx="6" cy="19" r="1.6" /><path d="M10 7h10M10 13h8M10 19h6" /></S>,
 };
 
 /* ---------------- route badge ---------------- */

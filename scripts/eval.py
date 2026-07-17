@@ -115,6 +115,36 @@ def main() -> int:
               f"{len(hresp.trace.evidence):>3}  {('conf%.0f%%' % ((info.parse_confidence or 0)*100)):>5}  "
               f"{(fname + ': ' + q)[:64]}")
 
+    # Phase 4 (deep research) — agentic iterative retrieval. Offline-deterministic:
+    # an evidence-spread question must ITERATE (round 1 alone can't satisfy the corpus
+    # spread), end grounded + citation-verified across several documents, and the whole
+    # search must be recorded in research_trace. The wall check: deep research must
+    # never ground an out-of-scope question in off-topic top-k passages.
+    dq = "Summarize the payment terms across every customer contract."
+    dresp = eng.ask(dq, deep_research=True)
+    drt = dresp.research_trace or {}
+    spread_ok = (
+        dresp.answer_state == "grounded" and not dresp.insufficient
+        and bool(dresp.trace.citation_check and dresp.trace.citation_check.verified)
+        and len(drt.get("documents_covered", [])) >= eng.settings.research_spread_min_docs
+        and 2 <= drt.get("total_rounds", 0) <= eng.settings.research_max_rounds
+    )
+    passed += spread_ok
+    total += 1
+    print(f"{'PDF':>7} {'deep':>7}  {'✓' if spread_ok else '✗':>2}  "
+          f"{len(dresp.trace.evidence):>3}  "
+          f"{('r%d/%dd' % (drt.get('total_rounds', 0), len(drt.get('documents_covered', [])))):>5}  "
+          f"{('[deep research] ' + dq)[:64]}")
+
+    wq = "What is our employee headcount in Berlin?"
+    wresp = eng.ask(wq, deep_research=True)
+    wall_ok = wresp.insufficient and wresp.answer_state == "insufficient"
+    passed += wall_ok
+    total += 1
+    print(f"{'NONE':>7} {'deep':>7}  {'✓' if wall_ok else '✗':>2}  "
+          f"{len(wresp.trace.evidence):>3}  {'wall':>5}  "
+          f"{('[deep research] ' + wq)[:64]}")
+
     print("-" * 100)
     print(f"{passed}/{total} passed\n")
     return 0 if passed == total else 1

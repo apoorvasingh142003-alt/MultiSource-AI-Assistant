@@ -5,7 +5,7 @@ import {
   fetchSessions, createSession, deleteSession, renameSession, fetchMessages,
   editMessage, deleteMessage, regenerateMessage, fetchHealth,
   ingestPdf, ingestSqlite, resetWorkspace,
-  type AskScope, type AskOptions, type AgentStep,
+  type AskScope, type AskOptions, type AgentStep, type ResearchStep,
 } from "@/lib/api";
 import type {
   AppConfig, ExampleQuestion, Inventory, Message, Session, SourceInfo,
@@ -154,6 +154,7 @@ export default function Page() {
       custom_system_prompt: settings.customSystemPrompt || null,
       multi_agent: settings.multiAgent,
       agent_mode: settings.agentMode,
+      deep_research: settings.deepResearch,
       temperature: settings.temperature > 0 ? settings.temperature : null,
     };
   }, [settings]);
@@ -204,14 +205,16 @@ export default function Page() {
     setBusy(true);
     const sid = await ensureSession();
     const id = tempId();
-    setTurns((prev) => [...prev, { id, question: query, streaming: true, streamingText: "", agentSteps: [] }]);
+    setTurns((prev) => [...prev, { id, question: query, streaming: true, streamingText: "", agentSteps: [], researchSteps: [] }]);
 
     const opts: AskOptions = { ...askOpts(), session_id: sid };
     let acc = "";
     const steps: AgentStep[] = [];
+    const rSteps: ResearchStep[] = [];
     try {
       await askStream(query, opts, {
         onAgentStep: (s) => { steps.push(s); patchTurn(id, { agentSteps: [...steps] }); },
+        onResearchStep: (s) => { rSteps.push(s); patchTurn(id, { researchSteps: [...rSteps] }); },
         onDelta: (t) => { acc += t; patchTurn(id, { streamingText: acc }); },
         onDone: (r) => { patchTurn(id, { resp: r, streaming: false }); },
         onError: () => { throw new Error("stream"); },
@@ -259,7 +262,7 @@ export default function Page() {
   const regenerateTurn = async (turn: ChatTurn) => {
     if (!activeSessionId || !turn.assistantMessageId || busy) return;
     setBusy(true);
-    patchTurn(turn.id, { streaming: true, streamingText: "", resp: undefined, text: undefined, agentSteps: [] });
+    patchTurn(turn.id, { streaming: true, streamingText: "", resp: undefined, text: undefined, agentSteps: [], researchSteps: [] });
     try {
       const r = await regenerateMessage(activeSessionId, turn.assistantMessageId, askOpts());
       patchTurn(turn.id, { resp: r, streaming: false });
@@ -272,7 +275,7 @@ export default function Page() {
   const editTurn = async (turn: ChatTurn, newText: string) => {
     if (!activeSessionId || !turn.userMessageId || busy) return;
     setBusy(true);
-    patchTurn(turn.id, { question: newText, edited: true, streaming: true, streamingText: "", resp: undefined, text: undefined, agentSteps: [] });
+    patchTurn(turn.id, { question: newText, edited: true, streaming: true, streamingText: "", resp: undefined, text: undefined, agentSteps: [], researchSteps: [] });
     try {
       await editMessage(activeSessionId, turn.userMessageId, newText);
       if (turn.assistantMessageId) {

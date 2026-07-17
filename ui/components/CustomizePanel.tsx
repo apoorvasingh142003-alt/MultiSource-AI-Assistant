@@ -39,7 +39,7 @@ export default function CustomizePanel({
 
   const hasCustom =
     settings.agentRole || settings.customSystemPrompt || settings.output !== "auto"
-    || settings.multiAgent || settings.agentMode;
+    || settings.multiAgent || settings.agentMode || settings.deepResearch;
 
   return (
     <div
@@ -109,6 +109,8 @@ export default function CustomizePanel({
 
         {/* Reasoning toggles */}
         <div className="grid grid-cols-2 gap-2">
+          <Toggle label="Deep research" hint="Iterate until enough" checked={settings.deepResearch}
+            onChange={(v) => onUpdate({ deepResearch: v })} />
           <Toggle label="Agent mode" hint="Iterative tools" checked={settings.agentMode}
             onChange={(v) => onUpdate({ agentMode: v })} />
           <Toggle label="Multi-agent" hint="Decompose" checked={settings.multiAgent}
@@ -117,7 +119,7 @@ export default function CustomizePanel({
 
         {hasCustom && (
           <button
-            onClick={() => onUpdate({ agentRole: "", customSystemPrompt: "", output: "auto", multiAgent: false, agentMode: false })}
+            onClick={() => onUpdate({ agentRole: "", customSystemPrompt: "", output: "auto", multiAgent: false, agentMode: false, deepResearch: false })}
             className="text-[11px] font-medium text-faint transition hover:text-rose-500"
           >
             Reset customizations

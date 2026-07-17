@@ -198,6 +198,7 @@ def ask(req: AskRequest, user: CurrentUser) -> AskResponse:
             session_id=req.session_id,
             multi_agent=req.multi_agent,
             agent_mode=req.agent_mode,
+            deep_research=req.deep_research,
             temperature=req.temperature,
             conversation_history=req.conversation_history,
         )
@@ -267,6 +268,7 @@ async def ask_stream(req: AskRequest, user: CurrentUser) -> StreamingResponse:
                     custom_system_prompt=req.custom_system_prompt, agent_role=req.agent_role,
                     output_format=req.output_format, session_id=req.session_id,
                     multi_agent=req.multi_agent, agent_mode=req.agent_mode,
+                    deep_research=req.deep_research,
                     temperature=req.temperature,
                     conversation_history=req.conversation_history,
                     on_token=on_token, on_event=on_event,
@@ -555,6 +557,7 @@ class RegenerateRequest(BaseModel):
     output_format: str | None = "auto"
     multi_agent: bool = False
     agent_mode: bool = False
+    deep_research: bool = False
     temperature: float | None = None
 
 
@@ -603,6 +606,7 @@ def regenerate_message(session_id: str, message_id: str, user: CurrentUser,
         custom_system_prompt=body.custom_system_prompt, agent_role=body.agent_role,
         output_format=body.output_format, session_id=session_id,
         multi_agent=body.multi_agent, agent_mode=body.agent_mode,
+        deep_research=body.deep_research,
         temperature=body.temperature, conversation_history=history,
     )
 
