@@ -124,7 +124,7 @@ export default function ReadAloud({ text }: { text: string }) {
             <select
               value={speed}
               onChange={(e) => setSpeed(parseFloat(e.target.value))}
-              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600"
+              className="h-7 rounded-md border border-line bg-surface px-1.5 text-[11px] text-body"
               title="Speed"
             >
               {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
@@ -136,7 +136,7 @@ export default function ReadAloud({ text }: { text: string }) {
           <select
             value={voiceIdx}
             onChange={(e) => setVoiceIdx(parseInt(e.target.value, 10))}
-            className="h-7 max-w-[140px] rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600"
+            className="h-7 max-w-[140px] rounded-md border border-line bg-surface px-1.5 text-[11px] text-body"
             title="Voice"
           >
             {langVoices.map((v, i) => <option key={v.name} value={i}>{v.name}</option>)}
@@ -145,7 +145,7 @@ export default function ReadAloud({ text }: { text: string }) {
       </div>
 
       {speaking && spoken && (
-        <p className="max-w-md rounded-md bg-indigo-50 px-2 py-1 text-[11px] italic leading-snug text-indigo-600 ring-1 ring-inset ring-indigo-100"
+        <p className="max-w-md rounded-md bg-indigo-50 px-2 py-1 text-[11px] italic leading-snug text-indigo-600 ring-1 ring-inset ring-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30"
           dir={lang === "he" ? "rtl" : "ltr"}>
           🔊 {spoken}
         </p>

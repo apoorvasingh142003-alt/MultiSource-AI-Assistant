@@ -31,9 +31,9 @@ function ArtifactContent({ artifact, asSlides }: { artifact: WorkspaceArtifact; 
     return (
       <div className="space-y-3">
         {slides.map((s, i) => (
-          <div key={i} className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm">
+          <div key={i} className="rounded-xl border border-line bg-gradient-to-br from-surface to-surface-2 p-4 shadow-sm">
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-400">Slide {i + 1}</div>
-            <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-slate-700">{s.trim()}</pre>
+            <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-body">{s.trim()}</pre>
           </div>
         ))}
       </div>
@@ -52,7 +52,7 @@ function ArtifactContent({ artifact, asSlides }: { artifact: WorkspaceArtifact; 
       {segments.map((seg, i) =>
         seg.type === "table"
           ? <AnswerTable key={i} table={seg.table} />
-          : <pre key={i} className="whitespace-pre-wrap font-sans text-[13.5px] leading-relaxed text-slate-700">{seg.content}</pre>
+          : <pre key={i} className="whitespace-pre-wrap font-sans text-[13.5px] leading-relaxed text-body">{seg.content}</pre>
       )}
     </div>
   );
@@ -83,22 +83,22 @@ function ArtifactModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 panel-transition"
       onClick={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl"
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-2xl bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-3.5">
+        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-3.5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Pill tone="indigo">{TYPE_ICON[artifact.artifact_type]}{artifact.artifact_type}</Pill>
-              <h2 className="truncate text-[15px] font-bold text-slate-900">{artifact.title}</h2>
+              <h2 className="truncate text-[15px] font-bold text-fg">{artifact.title}</h2>
             </div>
-            <p className="mt-0.5 truncate text-[11.5px] text-slate-400">{artifact.source_question}</p>
+            <p className="mt-0.5 truncate text-[11.5px] text-faint">{artifact.source_question}</p>
           </div>
-          <button onClick={onClose} className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+          <button onClick={onClose} className="shrink-0 rounded-md p-1 text-faint hover:bg-surface-2 hover:text-body">
             <Icons.x className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-2.5">
           <Button variant="secondary" size="sm" onClick={() => download("md")}>
             <Icons.doc className="h-3.5 w-3.5" />Download .md
           </Button>
@@ -147,25 +147,25 @@ function GenerateDialog({
       <Card className="w-full max-w-lg p-5" >
         <div onClick={(e) => e.stopPropagation()}>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[15px] font-bold text-slate-900">Generate new artifact</h2>
-            <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100">
+            <h2 className="text-[15px] font-bold text-fg">Generate new artifact</h2>
+            <button onClick={onClose} className="rounded-md p-1 text-faint hover:bg-surface-2">
               <Icons.x className="h-4 w-4" />
             </button>
           </div>
           <textarea
             value={question} onChange={(e) => setQuestion(e.target.value)}
             rows={3} placeholder="What should this artifact answer?"
-            className="focus-ring mb-2.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13.5px]"
+            className="focus-ring mb-2.5 w-full rounded-xl border border-line bg-surface px-3 py-2 text-[13.5px]"
           />
           <div className="mb-2.5 flex gap-2">
             <select value={type} onChange={(e) => setType(e.target.value as ArtifactType)}
-              className="focus-ring rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[12.5px] text-slate-700">
+              className="focus-ring rounded-lg border border-line bg-surface px-2.5 py-2 text-[12.5px] text-fg">
               {ARTIFACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
             <input
               value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder={`Title (auto: "${question.slice(0, 24)}…")`}
-              className="focus-ring flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[12.5px]"
+              className="focus-ring flex-1 rounded-lg border border-line bg-surface px-2.5 py-2 text-[12.5px]"
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -270,14 +270,14 @@ export default function WorkspaceView() {
               value={newName} onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") onCreateWorkspace(); }}
               placeholder="New workspace name"
-              className="focus-ring flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px]"
+              className="focus-ring flex-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[12.5px]"
             />
             <Button size="sm" onClick={onCreateWorkspace} disabled={!newName.trim()}>
               <Icons.plus className="h-3.5 w-3.5" />
             </Button>
           </div>
           {workspaces.length === 0 ? (
-            <p className="py-3 text-center text-[12px] text-slate-400">No workspaces yet.</p>
+            <p className="py-3 text-center text-[12px] text-faint">No workspaces yet.</p>
           ) : (
             <ul className="space-y-1.5">
               {workspaces.map((w) => (
@@ -285,14 +285,14 @@ export default function WorkspaceView() {
                   <button
                     onClick={() => setActiveId(w.id)}
                     className={cn("group flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left transition",
-                      activeId === w.id ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "hover:bg-slate-50")}
+                      activeId === w.id ? "bg-indigo-50 ring-1 ring-inset ring-indigo-200 dark:bg-indigo-500/10 dark:ring-indigo-500/30" : "hover:bg-surface-2")}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium text-slate-700">{w.name}</span>
-                      <span className="text-[10.5px] text-slate-400">{w.artifact_count ?? 0} artifact(s)</span>
+                      <span className="block truncate text-[13px] font-medium text-fg">{w.name}</span>
+                      <span className="text-[10.5px] text-faint">{w.artifact_count ?? 0} artifact(s)</span>
                     </span>
                     <span onClick={(e) => { e.stopPropagation(); onDeleteWorkspace(w.id); }}
-                      className="shrink-0 rounded p-1 text-slate-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                      className="shrink-0 rounded p-1 text-faint opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                       title="Delete workspace">
                       <Icons.x className="h-3.5 w-3.5" />
                     </span>
@@ -317,8 +317,8 @@ export default function WorkspaceView() {
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-[16px] font-bold text-slate-900">{active.name}</h2>
-                {active.description && <p className="text-[12px] text-slate-400">{active.description}</p>}
+                <h2 className="text-[16px] font-bold text-fg">{active.name}</h2>
+                {active.description && <p className="text-[12px] text-faint">{active.description}</p>}
               </div>
               <Tabs<StudioTab>
                 tabs={[
@@ -346,21 +346,21 @@ export default function WorkspaceView() {
                   <div className="grid gap-2.5 sm:grid-cols-2">
                     {artifacts.map((a) => (
                       <div key={a.id}
-                        className="group cursor-pointer rounded-xl border border-slate-200 bg-white p-3 transition hover:border-indigo-300 hover:shadow-sm"
+                        className="group cursor-pointer rounded-xl border border-line bg-surface p-3 transition hover:border-indigo-300 hover:shadow-sm"
                         onClick={() => setOpen(a)}>
                         <div className="flex items-center justify-between gap-2">
                           <Pill tone="indigo">{TYPE_ICON[a.artifact_type]}{a.artifact_type}</Pill>
                           <span onClick={(e) => { e.stopPropagation(); onDeleteArtifact(a.id); }}
-                            className="rounded p-0.5 text-slate-300 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                            className="rounded p-0.5 text-faint opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
                             title="Delete artifact">
                             <Icons.x className="h-3.5 w-3.5" />
                           </span>
                         </div>
-                        <h3 className="mt-1.5 truncate text-[13px] font-semibold text-slate-700">{a.title}</h3>
-                        <p className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-slate-500">
+                        <h3 className="mt-1.5 truncate text-[13px] font-semibold text-fg">{a.title}</h3>
+                        <p className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-muted">
                           {a.content.slice(0, 100)}
                         </p>
-                        <p className="mt-1.5 text-[10.5px] text-slate-400">{a.created_at?.slice(0, 16).replace("T", " ")}</p>
+                        <p className="mt-1.5 text-[10.5px] text-faint">{a.created_at?.slice(0, 16).replace("T", " ")}</p>
                       </div>
                     ))}
                   </div>

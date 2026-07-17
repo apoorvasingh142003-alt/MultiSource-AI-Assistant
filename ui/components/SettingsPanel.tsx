@@ -4,7 +4,7 @@ import { Button, Icons, cn } from "./ui";
 import { fetchModelMode, setModelMode } from "@/lib/api";
 import type { ModelModeStatus } from "@/lib/types";
 import {
-  AiSettingsState, OUTPUT_OPTIONS, PRESET_ROLES,
+  AiSettingsState, OUTPUT_OPTIONS,
 } from "./AiSettingsPanel";
 
 /* Dedicated Settings modal. Temperature is live here and is actually applied to
@@ -36,11 +36,11 @@ export default function SettingsPanel({
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
       <div className="surface relative z-10 max-h-[88vh] w-full max-w-2xl overflow-y-auto p-0">
         {/* header */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white/90 px-5 py-3.5 backdrop-blur">
-          <h2 className="flex items-center gap-2 text-[15px] font-bold text-slate-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface/90 px-5 py-3.5 backdrop-blur">
+          <h2 className="flex items-center gap-2 text-[15px] font-bold text-fg">
             <Icons.spark className="h-4 w-4 text-indigo-500" /> Settings
           </h2>
-          <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+          <button onClick={onClose} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-faint transition hover:bg-surface-2 hover:text-fg">
             <Icons.x className="h-4 w-4" />
           </button>
         </div>
@@ -51,9 +51,9 @@ export default function SettingsPanel({
             {/* Temperature */}
             <div>
               <div className="mb-1.5 flex items-center justify-between">
-                <label className="text-[13px] font-semibold text-slate-700">Temperature</label>
-                <span className="flex items-center gap-2 text-[12px] text-slate-500">
-                  <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">
+                <label className="text-[13px] font-semibold text-fg">Temperature</label>
+                <span className="flex items-center gap-2 text-[12px] text-muted">
+                  <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30">
                     {settings.temperature.toFixed(1)}
                   </span>
                   {tempLabel}
@@ -65,34 +65,49 @@ export default function SettingsPanel({
                 onChange={(e) => onUpdate({ temperature: parseFloat(e.target.value) })}
                 className="w-full accent-indigo-600"
               />
-              <div className="mt-1 flex justify-between text-[10.5px] text-slate-400">
+              <div className="mt-1 flex justify-between text-[10.5px] text-faint">
                 <span>0 · deterministic, grounded</span>
                 <span>1 · creative, varied</span>
               </div>
-              <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-faint">
                 Applies to final answer generation. Routing and SQL stay deterministic for reliability.
               </p>
             </div>
 
-            {/* Default role */}
+            {/* Default role — free text, ChatGPT-style (replaces the old persona picker) */}
             <div>
-              <label className="mb-1 block text-[13px] font-semibold text-slate-700">Default role</label>
-              <select
-                value={PRESET_ROLES.some((r) => r.value === settings.agentRole) ? settings.agentRole : ""}
+              <label className="mb-1 block text-[13px] font-semibold text-fg">Default role</label>
+              <input
+                type="text"
+                value={settings.agentRole}
                 onChange={(e) => onUpdate({ agentRole: e.target.value })}
-                className="focus-ring w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-700"
-              >
-                {PRESET_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+                placeholder="e.g. a senior financial analyst (leave blank for auto)"
+                className="focus-ring w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-[13px] text-fg placeholder:text-faint"
+              />
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-faint">
+                Applied to every answer. You can also set this per-message from the composer&apos;s Customize button.
+              </p>
+            </div>
+
+            {/* Default instructions — free text */}
+            <div>
+              <label className="mb-1 block text-[13px] font-semibold text-fg">Custom instructions</label>
+              <textarea
+                value={settings.customSystemPrompt}
+                onChange={(e) => { if (e.target.value.length <= 500) onUpdate({ customSystemPrompt: e.target.value }); }}
+                rows={2}
+                placeholder="How should the assistant respond? e.g. 'Be concise; focus on financial risk.'"
+                className="focus-ring w-full resize-y rounded-lg border border-line bg-surface-2 px-3 py-2 text-[13px] text-fg placeholder:text-faint"
+              />
             </div>
 
             {/* Default output */}
             <div>
-              <label className="mb-1 block text-[13px] font-semibold text-slate-700">Default output format</label>
+              <label className="mb-1 block text-[13px] font-semibold text-fg">Default output format</label>
               <select
                 value={settings.output}
                 onChange={(e) => onUpdate({ output: e.target.value })}
-                className="focus-ring w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-700"
+                className="focus-ring w-full rounded-lg border border-line bg-surface-2 px-3 py-2 text-[13px] text-fg"
               >
                 {OUTPUT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -146,12 +161,12 @@ function ModelModeToggle() {
     return (
       <button onClick={() => choose(mode)} disabled={busy}
         className={cn("flex-1 rounded-xl border px-3.5 py-3 text-left transition disabled:opacity-60",
-          active ? "border-indigo-300 bg-indigo-50 ring-1 ring-inset ring-indigo-200" : "border-slate-200 bg-white hover:border-indigo-200")}>
+          active ? "border-indigo-300 bg-indigo-50 ring-1 ring-inset ring-indigo-200 dark:bg-indigo-500/10 dark:border-indigo-500/50 dark:ring-indigo-500/30" : "border-line bg-surface-2 hover:border-indigo-200")}>
         <div className="flex items-center justify-between">
-          <span className="text-[13px] font-semibold text-slate-800">{title}</span>
+          <span className="text-[13px] font-semibold text-fg">{title}</span>
           {active && <span className="h-2 w-2 rounded-full bg-indigo-500" />}
         </div>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">{sub}</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-faint">{sub}</p>
       </button>
     );
   };
@@ -163,13 +178,13 @@ function ModelModeToggle() {
         <Opt mode="local" title="Local model" sub="Ollama / local server — no key needed" />
       </div>
       {status && (
-        <p className="mt-2 text-[11px] text-slate-400">
-          Active: <span className="font-medium text-slate-600">{status.model}</span>
+        <p className="mt-2 text-[11px] text-faint">
+          Active: <span className="font-medium text-body">{status.model}</span>
           {" · "}{status.provider}{status.live ? "" : " · offline"}
           {status.mode === "local" && <> · expects Ollama at <span className="font-mono">{status.base_url}</span></>}
         </p>
       )}
-      {err && <p className="mt-1.5 text-[11px] text-rose-500">{err}</p>}
+      {err && <p className="mt-1.5 text-[11px] text-rose-500 dark:text-rose-400">{err}</p>}
     </div>
   );
 }
@@ -178,8 +193,8 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   return (
     <section>
       <div className="mb-2.5 flex items-baseline justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{title}</h3>
-        {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{title}</h3>
+        {hint && <span className="text-[11px] text-faint">{hint}</span>}
       </div>
       <div className="space-y-4">{children}</div>
     </section>
@@ -191,10 +206,10 @@ function Toggle({ label, hint, checked, onChange }: {
 }) {
   return (
     <label className={cn("flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-2 ring-1 ring-inset transition",
-      checked ? "bg-indigo-50 ring-indigo-200" : "bg-slate-50 ring-slate-200")}>
-      <span className="text-[12.5px] font-medium text-slate-700">
+      checked ? "bg-indigo-50 ring-indigo-200 dark:bg-indigo-500/10 dark:ring-indigo-500/30" : "bg-surface-2 ring-line")}>
+      <span className="text-[12.5px] font-medium text-fg">
         {label}
-        {hint && <span className="block text-[10.5px] font-normal text-slate-400">{hint}</span>}
+        {hint && <span className="block text-[10.5px] font-normal text-faint">{hint}</span>}
       </span>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)}
         className="h-4 w-4 accent-indigo-600" />

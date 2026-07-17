@@ -71,16 +71,16 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
       </div>
 
       {building && (
-        <div className="mb-4 space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="mb-4 space-y-3 rounded-xl border border-line bg-surface-2/60 p-3">
           <input
             value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Workflow name (e.g. Weekly overdue report)"
-            className="focus-ring w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px]"
+            className="focus-ring w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-fg placeholder:text-faint"
           />
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={trigger} onChange={(e) => setTrigger(e.target.value as TriggerType)}
-              className="focus-ring rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-700"
+              className="focus-ring rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-[12px] text-fg"
             >
               <option value="manual">Manual</option>
               <option value="scheduled">Scheduled</option>
@@ -90,7 +90,7 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
               <input
                 value={cron} onChange={(e) => setCron(e.target.value)}
                 placeholder="cron e.g. 0 9 * * 1"
-                className="focus-ring w-40 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-[12px]"
+                className="focus-ring w-40 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-fg placeholder:text-faint"
                 title="Cron schedule (min hour day month weekday)"
               />
             )}
@@ -98,12 +98,12 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
 
           <div className="space-y-2">
             {steps.map((s, i) => (
-              <div key={i} className="rounded-lg border border-slate-200 bg-white p-2">
+              <div key={i} className="rounded-lg border border-line bg-surface p-2">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-slate-500">Step {i + 1}</span>
+                  <span className="text-[11px] font-semibold text-muted">Step {i + 1}</span>
                   {steps.length > 1 && (
                     <button onClick={() => setSteps((p) => p.filter((_, j) => j !== i))}
-                      className="rounded p-0.5 text-slate-400 hover:text-rose-500" title="Remove step">
+                      className="rounded p-0.5 text-faint hover:text-rose-500" title="Remove step">
                       <Icons.x className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -112,13 +112,13 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
                   value={s.question}
                   onChange={(e) => setSteps((p) => p.map((x, j) => j === i ? { ...x, question: e.target.value } : x))}
                   placeholder="Question to ask"
-                  className="focus-ring mb-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px]"
+                  className="focus-ring mb-1.5 w-full rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-[12px] text-fg placeholder:text-faint"
                 />
                 <div className="flex gap-2">
                   <select
                     value={s.artifact_type}
                     onChange={(e) => setSteps((p) => p.map((x, j) => j === i ? { ...x, artifact_type: e.target.value as ArtifactType } : x))}
-                    className="focus-ring rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-700"
+                    className="focus-ring rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-[12px] text-fg"
                   >
                     {ARTIFACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
@@ -126,7 +126,7 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
                     value={s.output_to}
                     onChange={(e) => setSteps((p) => p.map((x, j) => j === i ? { ...x, output_to: e.target.value } : x))}
                     placeholder="output label"
-                    className="focus-ring flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12px]"
+                    className="focus-ring flex-1 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-[12px] text-fg placeholder:text-faint"
                   />
                 </div>
               </div>
@@ -146,7 +146,7 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
       )}
 
       {loading ? (
-        <p className="py-6 text-center text-[12px] text-slate-400">Loading workflows…</p>
+        <p className="py-6 text-center text-[12px] text-faint">Loading workflows…</p>
       ) : workflows.length === 0 ? (
         <EmptyState icon={<Icons.bolt className="h-6 w-6" />} title="No workflows yet">
           Build a multi-step workflow that generates artifacts on demand or on a schedule.
@@ -154,14 +154,14 @@ export default function WorkflowBuilder({ workspaceId }: { workspaceId: string }
       ) : (
         <ul className="space-y-2">
           {workflows.map((w) => (
-            <li key={w.id} className="rounded-xl border border-slate-200 bg-white p-3">
+            <li key={w.id} className="rounded-xl border border-line bg-surface p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-semibold text-slate-700">{w.name}</span>
+                    <span className="truncate text-[13px] font-semibold text-fg">{w.name}</span>
                     <Pill tone={STATUS_TONE[w.status]}>{w.status}</Pill>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
                     <Pill tone="sky">{w.trigger_type}</Pill>
                     {w.schedule_cron && <span className="font-mono">{w.schedule_cron}</span>}
                     <span>· {w.steps.length} step(s)</span>

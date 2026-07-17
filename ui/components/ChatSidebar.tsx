@@ -78,17 +78,17 @@ export default function ChatSidebar({
 
   if (collapsed) {
     return (
-      <div className="flex w-12 flex-col items-center gap-2 border-r border-slate-200 bg-white py-3">
+      <div className="flex w-12 flex-col items-center gap-2 border-r border-line bg-surface py-3">
         <button
           onClick={onToggle}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-faint transition hover:bg-surface-2 hover:text-fg"
           title="Expand sidebar"
         >
           <Icons.chevron className="h-4 w-4" />
         </button>
         <button
           onClick={onNewSession}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-faint transition hover:bg-accent-soft hover:text-accent"
           title="New Chat"
         >
           <Icons.plus className="h-4 w-4" />
@@ -98,23 +98,23 @@ export default function ChatSidebar({
   }
 
   return (
-    <div className="flex w-[280px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <div className="flex w-[280px] shrink-0 flex-col border-r border-line bg-surface">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2.5">
-        <span className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
+        <span className="text-[12px] font-semibold uppercase tracking-wider text-muted">
           Chat History
         </span>
         <div className="flex items-center gap-1">
           <button
             onClick={onNewSession}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-indigo-500 transition hover:bg-indigo-50"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-accent transition hover:bg-accent-soft"
             title="New Chat"
           >
             <Icons.plus className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={onToggle}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-faint transition hover:bg-surface-2 hover:text-fg"
             title="Collapse sidebar"
           >
             <Icons.chevron className="h-3.5 w-3.5 rotate-180" />
@@ -125,13 +125,13 @@ export default function ChatSidebar({
       {/* Search */}
       <div className="px-3 py-2">
         <div className="relative">
-          <Icons.search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+          <Icons.search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-faint" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search chats…"
-            className="focus-ring w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-3 text-[12px] text-slate-700 placeholder:text-slate-400"
+            className="focus-ring w-full rounded-lg border border-line bg-surface-2 py-1.5 pl-8 pr-3 text-[12px] text-fg placeholder:text-faint"
           />
         </div>
       </div>
@@ -139,13 +139,13 @@ export default function ChatSidebar({
       {/* Session list */}
       <div className="scroll-thin flex-1 overflow-y-auto px-2 pb-3">
         {grouped.length === 0 && (
-          <p className="px-2 py-4 text-center text-[12px] text-slate-400">
+          <p className="px-2 py-4 text-center text-[12px] text-faint">
             No conversations yet
           </p>
         )}
         {grouped.map(({ group, items }) => (
           <div key={group} className="mb-2">
-            <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+            <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-faint">
               {group}
             </div>
             {items.map((s) => (
@@ -156,8 +156,8 @@ export default function ChatSidebar({
                 className={cn(
                   "group flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-[12.5px] transition",
                   activeSessionId === s.id
-                    ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
-                    : "text-slate-600 hover:bg-slate-50"
+                    ? "bg-accent-soft text-accent ring-1 ring-accent/30"
+                    : "text-body hover:bg-surface-2"
                 )}
               >
                 {editingId === s.id ? (
@@ -180,7 +180,7 @@ export default function ChatSidebar({
                       }
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="min-w-0 flex-1 rounded border border-indigo-300 bg-white px-1.5 py-0.5 text-[12px]"
+                    className="min-w-0 flex-1 rounded border border-accent/50 bg-surface px-1.5 py-0.5 text-[12px] text-fg"
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
@@ -189,7 +189,7 @@ export default function ChatSidebar({
                   </span>
                 )}
                 {s.message_count > 0 && editingId !== s.id && (
-                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-400">
+                  <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted ring-1 ring-inset ring-line">
                     {s.message_count}
                   </span>
                 )}
@@ -202,7 +202,7 @@ export default function ChatSidebar({
       {/* Context menu */}
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-[120px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          className="animate-scale-in fixed z-50 min-w-[130px] rounded-lg border border-line bg-overlay py-1 shadow-pop"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -214,7 +214,7 @@ export default function ChatSidebar({
               }
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-slate-600 hover:bg-slate-50"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-body hover:bg-surface-2"
           >
             <Icons.doc className="h-3 w-3" /> Rename
           </button>
@@ -225,7 +225,7 @@ export default function ChatSidebar({
               }
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-rose-600 hover:bg-rose-50"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
           >
             <Icons.x className="h-3 w-3" /> Delete
           </button>

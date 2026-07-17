@@ -33,15 +33,26 @@ Check items off as done. Each task names the likely files.
 
 ## Phase 2 — ChatGPT-class UI
 
-- [ ] Stand up assistant-ui + Vercel AI SDK in `ui/` (new chat surface; keep tokens/`globals.css`).
-- [ ] Wire streaming from `POST /ask/stream` into the AI SDK transport.
-- [ ] Side inspector panel with tabs: Answer · Trace · Evidence · Sources (reuse existing
-      `Inspector.tsx`, `trace.tsx`, `ExplainabilityPanel.tsx` content).
-- [ ] In-chat file upload → `POST /ingest/pdf`.
-- [ ] Replace `app/roles.py` persona picker with user-defined instructions (custom system prompt
-      per conversation/tenant). Remove the 13-persona UI.
-- [ ] Threads/history wired to existing `/sessions` endpoints.
-- [ ] `tsc --noEmit` + `next build` clean (remember the /home clone build workflow — see CLAUDE.md).
+See [plans/02-CHAT-SURFACE-plan.md](plans/02-CHAT-SURFACE-plan.md). **Stack deviation (approved):**
+kept the proven custom-SSE transport + rich `Trace` rendering instead of adopting assistant-ui +
+Vercel AI SDK — the AI SDK data-stream protocol would mean rewriting tested streaming for no
+user-visible gain, and the library isn't a locked decision (the exit criteria are a UX outcome).
+
+- [x] Rebuilt the chat surface into a clean ChatGPT-style shell (sidebar · clean chat · composer),
+      keeping tokens/`globals.css`. Top nav tabs removed; Studio (`WorkspaceView`) dropped from the
+      surface (files kept). (`ui/app/page.tsx`, `ui/components/ChatThread.tsx`, `Composer.tsx`.)
+- [x] Streaming wired from `POST /ask/stream` (existing `askStream`), smooth token stream + a
+      compact tri-state chip (`AnswerStateChip.tsx`) on every message.
+- [x] Side inspector panel with tabs Answer · Trace · Evidence · Sources — a slide-in drawer
+      (`ui/components/InspectorPanel.tsx`) reusing `AnswerPanel`, `Inspector.tsx`, `trace.tsx`,
+      `Workspace` rows verbatim. Citations + "Inspect" open it focused.
+- [x] In-chat file upload → `POST /ingest/pdf` (📎 in the composer) with visible ingest state +
+      a system note in the thread; SQLite upload lives in the Sources tab.
+- [x] Replaced the 13-persona picker with user-defined role + instructions (ChatGPT-style
+      `CustomizePanel.tsx`, mapped to existing `agent_role` / `custom_system_prompt` — no backend
+      change). `app/roles.py` retained only as the default label. Removed `PRESET_ROLES` from the UI.
+- [x] Threads/history kept wired to `/sessions` (sidebar unchanged).
+- [x] `tsc --noEmit` + `next build` clean (via the /home clone workflow).
 
 ## Phase 3 — Tri-state answers + generative components
 

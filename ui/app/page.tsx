@@ -8,19 +8,17 @@ import {
   type AskScope, type AskOptions, type AgentStep,
 } from "@/lib/api";
 import type {
-  AppConfig, AskResponse, ExampleQuestion, Inventory, Message, Session, SourceInfo,
+  AppConfig, ExampleQuestion, Inventory, Message, Session, SourceInfo,
 } from "@/lib/types";
-import { Icons, Tabs, Button, Card, EmptyState, IconButton, cn } from "@/components/ui";
+import { Icons, IconButton, cn } from "@/components/ui";
 import AccountMenu from "@/components/AccountMenu";
-import Workspace from "@/components/Workspace";
-import WorkspaceView from "@/components/WorkspaceView";
-import Inspector from "@/components/Inspector";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatThread, { type ChatTurn } from "@/components/ChatThread";
+import Composer from "@/components/Composer";
+import InspectorPanel, { type InspectorTab } from "@/components/InspectorPanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import { useAiSettings, resolveOutput } from "@/components/AiSettingsPanel";
 
-type TabId = "chat" | "workspace" | "studio" | "inspector";
 const SESSION_KEY = "nexus-active-session";
 
 let _tid = 0;
@@ -35,7 +33,6 @@ export default function Page() {
   // "warming" → backend reachable but the engine is still building its index (cold start).
   const [warming, setWarming] = React.useState(false);
 
-  const [tab, setTab] = React.useState<TabId>("chat");
   const [input, setInput] = React.useState("");
   const [turns, setTurns] = React.useState<ChatTurn[]>([]);
   const [busy, setBusy] = React.useState(false);
@@ -48,6 +45,11 @@ export default function Page() {
   const [activeSessionId, setActiveSessionId] = React.useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+
+  // inspector drawer
+  const [inspectorOpen, setInspectorOpen] = React.useState(false);
+  const [inspectorTab, setInspectorTab] = React.useState<InspectorTab>("answer");
+  const [inspectId, setInspectId] = React.useState<string | null>(null);
 
   // dark mode
   const [dark, setDark] = React.useState(false);
@@ -72,8 +74,12 @@ export default function Page() {
   const [dbMsg, setDbMsg] = React.useState<string | null>(null);
   const [dbErr, setDbErr] = React.useState<string | null>(null);
 
-  const lastResp = React.useMemo(
-    () => [...turns].reverse().find((t) => t.resp)?.resp ?? null, [turns]);
+  // The response currently shown in the inspector: the selected turn, else the latest answer.
+  const inspectResp = React.useMemo(() => {
+    const sel = turns.find((t) => t.id === inspectId)?.resp;
+    if (sel) return sel;
+    return [...turns].reverse().find((t) => t.resp)?.resp ?? null;
+  }, [turns, inspectId]);
 
   // ---- bootstrap ----
   const bootstrap = React.useCallback(() => {
@@ -131,7 +137,7 @@ export default function Page() {
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); handleNewSession(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "e") { e.preventDefault(); window.dispatchEvent(new CustomEvent("aba:toggle-explain")); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "e") { e.preventDefault(); setInspectorOpen((v) => !v); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -194,7 +200,6 @@ export default function Page() {
   const run = async (q: string) => {
     const query = q.trim();
     if (!query || busy) return;
-    setTab("chat");
     setInput("");
     setBusy(true);
     const sid = await ensureSession();
@@ -229,6 +234,25 @@ export default function Page() {
     } catch { /* ignore */ }
     fetchSessions().then(setSessions).catch(() => {});
     setBusy(false);
+  };
+
+  // ---- inspector wiring ----
+  const openInspector = (turn: ChatTurn, tab: InspectorTab) => {
+    setInspectId(turn.id);
+    setInspectorTab(tab);
+    setInspectorOpen(true);
+  };
+  const openCitation = (turn: ChatTurn, evId: string) => {
+    setInspectId(turn.id);
+    setInspectorTab("answer");
+    setInspectorOpen(true);
+    // let the panel render, then scroll the evidence into view + pulse it
+    setTimeout(() => {
+      const el = document.getElementById(`ev-${evId}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.classList.add("cite-pulse");
+      setTimeout(() => el?.classList.remove("cite-pulse"), 1700);
+    }, 260);
   };
 
   // ---- per-turn actions ----
@@ -280,11 +304,11 @@ export default function Page() {
       const s = await createSession();
       setSessions((prev) => [s, ...prev]);
       setActiveSessionId(s.id);
-      setTurns([]); setInput(""); setTab("chat");
+      setTurns([]); setInput("");
     } catch { /* ignore */ }
   };
   const handleSelectSession = async (id: string) => {
-    setActiveSessionId(id); setTab("chat"); await loadSession(id);
+    setActiveSessionId(id); await loadSession(id);
   };
   const handleDeleteSession = async (id: string) => {
     try {
@@ -302,16 +326,28 @@ export default function Page() {
 
   // ---- uploads ----
   const refreshSources = () => { fetchSources().then(setSources).catch(() => {}); };
+  const addSystemNote = (text: string, error = false) =>
+    setTurns((prev) => [...prev, { id: tempId(), question: text, system: true, error: error ? text : null }]);
+
   const handlePdf = async (files: File[]) => {
     setPdfBusy(true); setPdfMsg(null); setPdfErr(null);
     try {
       const res = await ingestPdf(files);
       setInventory(res.inventory);
       const failed = res.documents.filter((d) => d.status === "error");
-      if (failed.length) setPdfErr(failed.map((f) => `${f.name}: ${f.error || "failed"}`).join("; "));
-      else setPdfMsg(res.message);
+      if (failed.length) {
+        const msg = failed.map((f) => `${f.name}: ${f.error || "failed"}`).join("; ");
+        setPdfErr(msg); addSystemNote(`Upload failed — ${msg}`, true);
+      } else {
+        setPdfMsg(res.message);
+        const names = res.documents.map((d) => d.name).join(", ");
+        addSystemNote(`Added ${res.documents.length} document(s): ${names}. Ask away — answers can now cite them.`);
+      }
       refreshSources();
-    } catch (e: any) { setPdfErr(e?.message || "Upload failed."); }
+    } catch (e: any) {
+      const msg = e?.message || "Upload failed.";
+      setPdfErr(msg); addSystemNote(`Upload failed — ${msg}`, true);
+    }
     finally { setPdfBusy(false); }
   };
   const handleSqlite = async (files: File[]) => {
@@ -337,15 +373,13 @@ export default function Page() {
     finally { setResetting(false); }
   };
 
-  const tabs: { id: TabId; label: string; icon?: React.ReactNode }[] = [
-    { id: "chat", label: "Chat", icon: <Icons.spark className="h-3.5 w-3.5" /> },
-    { id: "workspace", label: "Workspace", icon: <Icons.grid className="h-3.5 w-3.5" /> },
-    { id: "studio", label: "Studio", icon: <Icons.layers className="h-3.5 w-3.5" /> },
-    { id: "inspector", label: "Inspector", icon: <Icons.inspect className="h-3.5 w-3.5" /> },
-  ];
+  const uploadedCount =
+    (inventory?.documents.filter((d) => d.origin === "uploaded").length ?? 0) +
+    (inventory?.databases.filter((d) => d.origin === "uploaded").length ?? 0);
 
-  const onComposerKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(input); }
+  const sourcesProps = {
+    inventory, onUploadPdf: handlePdf, onUploadSqlite: handleSqlite, onReset: handleReset,
+    pdfBusy, sqliteBusy, resetting, pdfMsg, pdfErr, dbMsg, dbErr,
   };
 
   return (
@@ -360,33 +394,34 @@ export default function Page() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* top app bar */}
         <header className="glass sticky top-0 z-20 border-b border-line">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-brand-gradient flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-glow">
-                <Icons.layers className="h-5 w-5" />
+          <div className="flex items-center gap-x-3 px-5 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-brand-gradient flex h-8 w-8 items-center justify-center rounded-xl text-white shadow-glow">
+                <Icons.layers className="h-4.5 w-4.5" />
               </div>
               <div>
-                <h1 className="text-[15px] font-bold leading-tight text-fg">Nexus AI</h1>
-                <p className="text-[11px] leading-tight text-faint">Adaptive Multi-Domain Intelligence Agent</p>
+                <h1 className="text-[14px] font-bold leading-tight text-fg">Nexus AI</h1>
+                <p className="text-[10.5px] leading-tight text-faint">Grounded multi-source assistant</p>
               </div>
             </div>
 
-            <div className="order-3 w-full sm:order-2 sm:mx-auto sm:w-auto">
-              <Tabs tabs={tabs} active={tab} onChange={setTab} />
-            </div>
-
-            <div className="order-2 ml-auto flex items-center gap-2 sm:order-3">
+            <div className="ml-auto flex items-center gap-2">
               {config && (
                 <span className="hidden items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[11px] font-medium text-muted ring-1 ring-inset ring-line sm:inline-flex">
                   <span className={cn("h-1.5 w-1.5 rounded-full", config.mode === "live" ? "bg-emerald-500 shadow-[0_0_0_3px] shadow-emerald-500/20" : "bg-amber-500")} />
                   {config.mode === "live" ? `Live · ${config.provider}` : "Offline"}
                 </span>
               )}
-              {(settings.agentRole || settings.customSystemPrompt || settings.agentMode || settings.output !== "auto") && (
-                <span className="inline-flex items-center gap-1 rounded-lg bg-accent-soft px-2 py-1.5 text-[11px] font-medium text-accent ring-1 ring-inset ring-accent/25">
-                  <Icons.spark className="h-3 w-3" />{settings.agentMode ? "Agent" : "Customized"}
-                </span>
-              )}
+              <IconButton onClick={() => { setInspectorTab("sources"); setInspectorOpen(true); }}
+                title="Sources & uploads" active={inspectorOpen && inspectorTab === "sources"}>
+                <Icons.doc className="h-4 w-4" />
+                {uploadedCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold text-white">{uploadedCount}</span>
+                )}
+              </IconButton>
+              <IconButton onClick={() => setInspectorOpen((v) => !v)} title="Inspector (Ctrl+E)" active={inspectorOpen}>
+                <Icons.inspect className="h-4 w-4" />
+              </IconButton>
               <IconButton onClick={() => setDark((d) => !d)} title={dark ? "Switch to light mode" : "Switch to dark mode"}>
                 {dark ? <Icons.sun className="h-4 w-4" /> : <Icons.moon className="h-4 w-4" />}
               </IconButton>
@@ -398,7 +433,7 @@ export default function Page() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex flex-1 flex-col overflow-hidden">
           {connecting && (
             <div className="mx-auto mt-4 flex max-w-3xl items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13px] text-muted shadow-sm">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-line border-t-accent" />
@@ -414,81 +449,37 @@ export default function Page() {
             </div>
           )}
 
-          {tab === "chat" && (
-            <div className="mx-auto flex h-full max-w-3xl flex-col px-4 py-5">
-              <div className="flex-1">
-                {turns.length === 0 ? (
-                  <Card className="mt-6">
-                    <EmptyState icon={<Icons.spark className="h-6 w-6" />} title="Ask anything">
-                      Have a two-way conversation grounded in your documents and data. Answers stream live with
-                      verifiable citations; follow-up questions keep context. Turn on <b>Agent mode</b> in settings
-                      for step-by-step tool reasoning.
-                    </EmptyState>
-                    {examples.length > 0 && (
-                      <div className="flex flex-wrap justify-center gap-2 px-4 pb-5">
-                        {examples.slice(0, 6).map((ex) => (
-                          <button key={ex.question} onClick={() => run(ex.question)} title={ex.question}
-                            className="rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] text-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-accent">
-                            {ex.label || ex.question.slice(0, 40)}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                ) : (
-                  <ChatThread
-                    turns={turns} busy={busy}
-                    onOpenInspector={() => setTab("inspector")}
-                    onEditQuestion={editTurn} onDeleteTurn={deleteTurn} onRegenerate={regenerateTurn}
-                  />
-                )}
-              </div>
-
-              {/* composer */}
-              <div className="sticky bottom-0 mt-4 pb-2">
-                <Card className="p-2.5 shadow-lg ring-1 ring-line/60 transition focus-within:ring-accent/40">
-                  <textarea
-                    value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onComposerKey}
-                    rows={2} placeholder="Message Nexus AI…"
-                    className="focus-ring max-h-40 w-full resize-y rounded-xl border border-line bg-surface-2 px-3.5 py-2.5 text-[15px] leading-relaxed text-fg placeholder:text-faint" />
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
-                      {settings.agentMode && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent ring-1 ring-inset ring-accent/25">Agent mode</span>}
-                      {settings.temperature > 0 && <span className="rounded bg-surface-2 px-1.5 py-0.5 font-medium text-muted ring-1 ring-inset ring-line">temp {settings.temperature.toFixed(1)}</span>}
-                      <span className="hidden sm:inline">
-                        <kbd className="rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Enter</kbd> to send ·
-                        <kbd className="ml-1 rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Shift</kbd>+<kbd className="rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-medium text-muted">Enter</kbd> for newline
-                      </span>
-                    </span>
-                    <Button size="md" onClick={() => run(input)} disabled={busy || warming || !input.trim()}>
-                      {busy || warming ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <Icons.send className="h-4 w-4" />}
-                      {warming ? "Warming…" : busy ? "Working…" : "Send"}
-                    </Button>
-                  </div>
-                </Card>
-              </div>
+          {/* scrollable thread */}
+          <div className="scroll-thin flex-1 overflow-y-auto">
+            <div className="mx-auto max-w-3xl px-4 py-6">
+              {turns.length === 0 ? (
+                <Welcome examples={examples} onPick={run} onUpload={() => { setInspectorTab("sources"); setInspectorOpen(true); }} />
+              ) : (
+                <ChatThread
+                  turns={turns} busy={busy}
+                  onEditQuestion={editTurn} onDeleteTurn={deleteTurn} onRegenerate={regenerateTurn}
+                  onInspect={openInspector} onCite={openCitation} activeInspectId={inspectId}
+                />
+              )}
             </div>
-          )}
+          </div>
 
-          {tab === "workspace" && (
-            <div className="px-5 py-6">
-              <Workspace
-                inventory={inventory}
-                onUploadPdf={handlePdf} onUploadSqlite={handleSqlite} onReset={handleReset}
-                pdfBusy={pdfBusy} sqliteBusy={sqliteBusy} resetting={resetting}
-                pdfMsg={pdfMsg} pdfErr={pdfErr} dbMsg={dbMsg} dbErr={dbErr}
-              />
-            </div>
-          )}
-          {tab === "studio" && <div className="px-5 py-6"><div className="mx-auto max-w-7xl"><WorkspaceView /></div></div>}
-          {tab === "inspector" && <div className="px-5 py-6"><div className="mx-auto max-w-7xl"><Inspector resp={lastResp} /></div></div>}
+          {/* composer */}
+          <div className="border-t border-line bg-app/60 px-4 py-3 backdrop-blur">
+            <Composer
+              value={input} onChange={setInput} onSend={() => run(input)} onAttach={handlePdf}
+              busy={busy} warming={warming} pdfBusy={pdfBusy}
+              settings={settings} onUpdateSettings={updateSettings}
+            />
+          </div>
         </main>
-
-        <footer className="px-5 pb-3 pt-1 text-center text-[11px] leading-relaxed text-faint">
-          PDF + SQLite · agentic chat · hybrid retrieval (dense + BM25 + RRF + rerank) · grounded generation ·
-          citation verification · Ctrl+K new chat
-        </footer>
       </div>
+
+      <InspectorPanel
+        open={inspectorOpen} resp={inspectResp} tab={inspectorTab}
+        onTabChange={setInspectorTab} onClose={() => setInspectorOpen(false)}
+        sources={sourcesProps}
+      />
 
       {settingsOpen && (
         <SettingsPanel
@@ -497,6 +488,49 @@ export default function Page() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* ---- empty-state welcome ---- */
+function Welcome({
+  examples, onPick, onUpload,
+}: {
+  examples: ExampleQuestion[];
+  onPick: (q: string) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="fade-up flex min-h-[52vh] flex-col items-center justify-center text-center">
+      <div className="bg-brand-gradient mb-5 flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-glow">
+        <Icons.spark className="h-7 w-7" />
+      </div>
+      <h2 className="text-[22px] font-bold text-fg">What do you want to know?</h2>
+      <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-muted">
+        Ask across your documents and data. Every answer is labeled by how much to trust it —{" "}
+        <span className="font-medium text-emerald-600 dark:text-emerald-400">grounded &amp; cited</span>,{" "}
+        <span className="font-medium text-amber-600 dark:text-amber-400">reasoned advice</span>, or an honest{" "}
+        <span className="font-medium text-slate-500 dark:text-slate-400">not-found</span>.
+      </p>
+
+      {examples.length > 0 && (
+        <div className="mt-7 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+          {examples.slice(0, 4).map((ex) => (
+            <button key={ex.question} onClick={() => onPick(ex.question)} title={ex.question}
+              className="group flex items-start gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-3 text-left transition hover:border-accent/40 hover:bg-accent-soft">
+              <Icons.arrowR className="mt-0.5 h-4 w-4 shrink-0 text-faint transition group-hover:text-accent" />
+              <span className="text-[13px] leading-snug text-body group-hover:text-accent">
+                {ex.label || ex.question.slice(0, 60)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <button onClick={onUpload}
+        className="mt-6 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted transition hover:text-accent">
+        <Icons.upload className="h-4 w-4" />Upload your own PDF or database
+      </button>
     </div>
   );
 }

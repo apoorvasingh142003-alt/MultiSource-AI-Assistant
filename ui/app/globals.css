@@ -2,45 +2,92 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =========================================================================
+   Design tokens — a single source of truth for color.
+   Values are space-separated RGB channels so Tailwind's `rgb(var() / <alpha>)`
+   opacity modifiers keep working. Every semantic token flips in dark mode, so
+   text/surface/border contrast is correct in both themes (no "grey on grey").
+   ========================================================================= */
 :root {
   color-scheme: light;
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --border: #e6e8ec;
-  --border-strong: #d3d7df;
-  --accent: #4f46e5;
-  --accent-light: rgba(79, 70, 229, 0.08);
+  --c-app: 244 246 250;          /* page background          */
+  --c-surface: 255 255 255;      /* cards / raised surfaces  */
+  --c-surface-2: 247 249 252;    /* muted inner panels       */
+  --c-overlay: 255 255 255;      /* popovers / menus         */
+  --c-line: 228 231 237;         /* hairline borders         */
+  --c-line-strong: 209 214 223;  /* stronger borders         */
+  --c-fg: 15 23 42;              /* primary text (headings)  */
+  --c-body: 51 65 85;            /* body copy                */
+  --c-muted: 100 116 139;        /* secondary text           */
+  --c-faint: 148 163 184;        /* tertiary / placeholder   */
+  --c-accent: 79 70 229;         /* indigo-600               */
+  --c-accent-strong: 67 56 202;  /* indigo-700               */
+  --c-accent-soft: 238 238 255;  /* indigo tint bg           */
+  --c-accent-fg: 255 255 255;
+
+  /* legacy aliases kept for a few hand-written rules below */
+  --bg: rgb(var(--c-app));
+  --surface: rgb(var(--c-surface));
+  --border: rgb(var(--c-line));
+  --border-strong: rgb(var(--c-line-strong));
+  --accent: rgb(var(--c-accent));
+
+  --app-gradient:
+    radial-gradient(1100px 620px at 12% -8%, rgba(99, 102, 241, 0.10), transparent 60%),
+    radial-gradient(1000px 640px at 108% 4%, rgba(14, 165, 233, 0.08), transparent 55%);
 }
 
-/* dark variables, shared by the OS preference and the manual toggle */
+/* Dark — driven by the `.dark` class (manual toggle) and, as a fallback, the OS preference. */
+.dark,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-app: 8 10 16;
+  --c-surface: 20 23 32;
+  --c-surface-2: 27 31 42;
+  --c-overlay: 30 34 46;
+  --c-line: 38 43 56;
+  --c-line-strong: 55 62 78;
+  --c-fg: 241 245 249;           /* slate-100 — bright, readable */
+  --c-body: 203 213 225;         /* slate-300                    */
+  --c-muted: 148 163 184;        /* slate-400 — readable on dark */
+  --c-faint: 113 122 141;        /* dimmed but legible           */
+  --c-accent: 129 140 248;       /* indigo-400 — pops on dark    */
+  --c-accent-strong: 165 180 252;
+  --c-accent-soft: 30 30 62;
+  --c-accent-fg: 255 255 255;
+
+  --app-gradient:
+    radial-gradient(1100px 620px at 10% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
+    radial-gradient(1000px 660px at 110% 2%, rgba(56, 189, 248, 0.10), transparent 55%);
+}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --border-strong: #3a3d4a;
-    --accent: #6366f1;
-    --accent-light: rgba(99, 102, 241, 0.12);
+    --c-app: 8 10 16;
+    --c-surface: 20 23 32;
+    --c-surface-2: 27 31 42;
+    --c-overlay: 30 34 46;
+    --c-line: 38 43 56;
+    --c-line-strong: 55 62 78;
+    --c-fg: 241 245 249;
+    --c-body: 203 213 225;
+    --c-muted: 148 163 184;
+    --c-faint: 113 122 141;
+    --c-accent: 129 140 248;
+    --c-accent-strong: 165 180 252;
+    --c-accent-soft: 30 30 62;
+    --app-gradient:
+      radial-gradient(1100px 620px at 10% -10%, rgba(99, 102, 241, 0.16), transparent 60%),
+      radial-gradient(1000px 660px at 110% 2%, rgba(56, 189, 248, 0.10), transparent 55%);
   }
-}
-
-/* manual override (set by the dark-mode toggle in the top nav) */
-html.dark,
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --border: #2a2d3a;
-  --border-strong: #3a3d4a;
-  --accent: #6366f1;
-  --accent-light: rgba(99, 102, 241, 0.12);
 }
 
 html,
 body {
-  @apply text-slate-700 antialiased;
-  background-color: var(--bg);
+  @apply text-body antialiased;
+  background-color: rgb(var(--c-app));
+  background-image: var(--app-gradient);
+  background-attachment: fixed;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
     Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -48,33 +95,33 @@ body {
 
 /* Card / surface */
 .surface {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: rgb(var(--c-surface));
+  border: 1px solid rgb(var(--c-line));
   border-radius: 14px;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
 }
-
 .surface-muted {
-  background: #fafbfc;
-  border: 1px solid var(--border);
+  background: rgb(var(--c-surface-2));
+  border: 1px solid rgb(var(--c-line));
   border-radius: 12px;
 }
-
-/* In dark mode soften the heavy drop shadow and align muted surfaces. */
-html.dark .surface,
+.dark .surface,
 :root[data-theme="dark"] .surface {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.28);
 }
-html.dark .surface-muted,
-:root[data-theme="dark"] .surface-muted {
-  background: rgba(255, 255, 255, 0.03);
+
+/* Frosted top bars / menus */
+.glass {
+  background: rgb(var(--c-surface) / 0.72);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
 }
 
 /* Subtle focus ring used on inputs/buttons */
 .focus-ring:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16);
-  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.28);
+  border-color: rgb(var(--c-accent));
 }
 
 /* Scrollbars */
@@ -83,20 +130,22 @@ html.dark .surface-muted,
   width: 9px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-slate-300;
+  border-radius: 9999px;
+  background: rgb(var(--c-line-strong));
 }
 .scroll-thin::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-400;
+  background: rgb(var(--c-muted));
 }
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Code surface (SQL / mono blocks) on light backgrounds */
+/* Code surface (SQL / mono blocks) — dark in both themes by design */
 .code-surface {
-  background: #0f172a;
+  background: #0b1120;
   color: #e2e8f0;
   border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 /* Citation pulse when a cited evidence item is focused */
@@ -104,38 +153,23 @@ html.dark .surface-muted,
   animation: cite 1.6s ease-out;
 }
 @keyframes cite {
-  0% {
-    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4);
-  }
-  100% {
-    box-shadow: 0 0 0 14px rgba(79, 70, 229, 0);
-  }
+  0% { box-shadow: 0 0 0 0 rgb(var(--c-accent) / 0.4); }
+  100% { box-shadow: 0 0 0 14px rgb(var(--c-accent) / 0); }
 }
 
 @keyframes fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-.fade-up {
-  animation: fade-up 0.32s ease-out both;
-}
+.fade-up { animation: fade-up 0.32s ease-out both; }
 
-/* Smooth panel transitions (Section 12) */
-.panel-transition {
-  transition: all 200ms ease-in-out;
-}
+.panel-transition { transition: all 200ms ease-in-out; }
 
 /* Indeterminate progress bar for ingestion */
 .progress-track {
   position: relative;
   overflow: hidden;
-  background: #eceef2;
+  background: rgb(var(--c-surface-2));
   border-radius: 9999px;
 }
 .progress-indeterminate::after {
@@ -144,53 +178,88 @@ html.dark .surface-muted,
   inset: 0;
   width: 40%;
   border-radius: 9999px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background: linear-gradient(90deg, transparent, rgb(var(--c-accent)), transparent);
   animation: indeterminate 1.1s ease-in-out infinite;
 }
 @keyframes indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
 }
 
 /* Drop target highlight */
 .dropzone {
-  border: 1.5px dashed var(--border-strong);
+  border: 1.5px dashed rgb(var(--c-line-strong));
   border-radius: 12px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 .dropzone.is-over {
-  border-color: var(--accent);
-  background: rgba(79, 70, 229, 0.04);
+  border-color: rgb(var(--c-accent));
+  background: rgb(var(--c-accent) / 0.06);
 }
 
-/* Skeleton loader (Section 12) */
+/* Skeleton loader */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 .skeleton {
   background: linear-gradient(
     90deg,
-    #f0f0f0 25%,
-    #e0e0e0 50%,
-    #f0f0f0 75%
+    rgb(var(--c-surface-2)) 25%,
+    rgb(var(--c-line)) 50%,
+    rgb(var(--c-surface-2)) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: 8px;
 }
 
-/* Mobile responsive adjustments (Section 12) */
+/* Brand gradient text (logo / accents) */
+.text-gradient {
+  background: linear-gradient(100deg, #6366f1, #8b5cf6 42%, #0ea5e9);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bg-brand-gradient {
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 55%, #4f46e5 100%);
+}
+
+/* Auth hero animated aurora backdrop */
+.aurora {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora::before,
+.aurora::after {
+  content: "";
+  position: absolute;
+  width: 55vw;
+  height: 55vw;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.55;
+  animation: drift 18s ease-in-out infinite;
+}
+.aurora::before {
+  background: radial-gradient(circle at 30% 30%, #6366f1, transparent 60%);
+  top: -18%;
+  left: -10%;
+}
+.aurora::after {
+  background: radial-gradient(circle at 60% 60%, #0ea5e9, transparent 60%);
+  bottom: -22%;
+  right: -12%;
+  animation-delay: -9s;
+}
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(4%, 6%) scale(1.12); }
+}
+
+/* Mobile responsive adjustments */
 @media (max-width: 640px) {
-  .surface {
-    border-radius: 10px;
-  }
+  .surface { border-radius: 10px; }
 }
