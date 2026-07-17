@@ -16,3 +16,6 @@ os.environ["ABA_AUTH_ENABLED"] = "false"
 os.environ.setdefault("ABA_OFFLINE_MODE", "always")
 os.environ.setdefault("ABA_EMBEDDING_BACKEND", "hashing")
 os.environ.setdefault("ABA_ENABLE_RERANK", "false")
+# Force the deterministic pypdf parser so the suite never imports torch/Docling and stays
+# hermetic + fast, regardless of whether Docling happens to be installed in this env.
+os.environ.setdefault("ABA_PDF_PARSER", "basic")

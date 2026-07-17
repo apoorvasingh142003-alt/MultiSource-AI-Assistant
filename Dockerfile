@@ -14,9 +14,11 @@ RUN apt-get update \
 
 COPY requirements.txt requirements-ml.txt ./
 
-# INSTALL_ML=false → lean image with the deterministic hashing-embedding fallback
-# INSTALL_ML=true  → adds sentence-transformers + torch for true BGE-M3 multilingual
-#                    embeddings and a cross-encoder reranker (multi-GB image).
+# INSTALL_ML=false → lean image: deterministic hashing-embedding fallback + the pypdf
+#                    "basic" PDF parser (with a deterministic parse-confidence signal).
+# INSTALL_ML=true  → adds sentence-transformers + torch (BGE-M3 multilingual embeddings +
+#                    cross-encoder reranker) AND Docling (robust tables / multi-column /
+#                    scans-via-OCR). Set ABA_PDF_PARSER=auto|docling to use Docling. Multi-GB.
 ARG INSTALL_ML=false
 RUN pip install -r requirements.txt \
  && if [ "$INSTALL_ML" = "true" ]; then pip install -r requirements-ml.txt; fi

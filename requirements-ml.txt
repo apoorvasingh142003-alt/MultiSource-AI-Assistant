@@ -8,3 +8,9 @@
 sentence-transformers>=3.0
 torch>=2.2
 qdrant-client>=1.9
+
+# Docling — robust PDF ingestion (merged/nested tables, multi-column, scans via OCR).
+# Optional + import-guarded (app/ingestion/parsers/docling_parser.py). With this installed
+# and ABA_PDF_PARSER=auto|docling, uploads parse through Docling; otherwise the deterministic
+# pypdf "basic" parser is used (offline/CI). Pulls torch (already above) + layout/OCR models.
+docling>=2.7,<3

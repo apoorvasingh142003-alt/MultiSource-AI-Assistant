@@ -87,6 +87,13 @@ Everything is recorded into a single `Trace` (`app/models.py`) that every UI pan
 - **Document branch** (`app/retrieval/`): dense embeddings + BM25 → RRF fusion (`fusion.py`) →
   optional cross-encoder rerank (`rerank.py`) → semantic keep-ratio gate. `document_retriever.py`
   owns the hybrid `DocumentIndex`; `vector_store.py` has numpy (default) + Qdrant backends.
+- **PDF ingestion** (`app/ingestion/pdf.py` → `app/ingestion/parsers/`): pluggable parsers behind
+  the stable `ingest_pdf`/`ingest_pdf_dir` API. `basic` (pypdf, always available, offline/CI
+  default) and `docling` (robust tables/multi-column/OCR, optional heavy dep, import-guarded).
+  `ABA_PDF_PARSER=auto|docling|basic`; Docling failures fall back to basic per-file. Every chunk
+  carries a **parse-confidence** (0..1) that flows to `Evidence.parse_confidence` → `trust_factors`;
+  a low-confidence *cited* passage adds a `verification_warning` + answer caveat but stays
+  **grounded** (the tri-state wall is never blended). Tests force `basic` for determinism.
 - **SQL branch** (`app/sql/`): `generate.py` (schema-aware LLM SQL) → `validate.py` (sqlglot AST,
   read-only, SELECT-only, allow-listed tables, LIMIT) → `execute.py`. The model never touches the DB directly.
 - **HYBRID (agentic)**: SQL finds rows → entities extracted and linked to specific documents →

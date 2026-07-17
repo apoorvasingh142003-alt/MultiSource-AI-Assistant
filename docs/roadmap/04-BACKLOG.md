@@ -16,12 +16,20 @@ Check items off as done. Each task names the likely files.
 
 ## Phase 1 — Docling ingestion
 
-- [ ] Add Docling as a parser behind the ingestion interface (`app/ingestion/pdf.py`,
-      `app/ingestion/__init__.py`). Keep the old parser as fallback.
-- [ ] Table-aware chunking; preserve table structure into markdown for retrieval.
-- [ ] Emit per-document/parse **confidence**; thread it into evidence + the credibility label.
-- [ ] Add 2–3 hard PDFs (merged tables, multi-column, a scan) to the eval corpus.
-- [ ] Eval: assert correct cited answers on the hard PDFs; graceful labeled degradation on parse fail.
+- [x] Add Docling as a parser behind the ingestion interface — pluggable parsers under
+      `app/ingestion/parsers/` (`basic` = pypdf, always available; `docling` = import-guarded,
+      optional). `ingest_pdf`/`ingest_pdf_dir` unchanged; `ABA_PDF_PARSER=auto|docling|basic`.
+      Per-file fallback to basic on any Docling failure. See [plans/01-DOCLING-plan.md](plans/01-DOCLING-plan.md).
+- [x] Table-aware chunking; table structure preserved into markdown for retrieval (Docling
+      markdown tables kept whole; basic parser keeps pipe-delimited tables intact).
+- [x] Emit per-document/parse **confidence** (`Chunk`/`IngestedDoc` → chunk dict → `Evidence`
+      → `trust_factors`); thread it into the credibility label as a caveat.
+- [x] Add hard PDFs (merged table, multi-column, image-only scan) to a separate eval corpus
+      (`scripts/make_hard_pdfs.py` → `data/eval_pdfs/`, kept out of the seeded demo).
+- [x] Eval: correct cited answers on the hard PDFs (`scripts/eval.py` Phase-1 block);
+      graceful labelled degradation on parse fail (empty scan → `status=error`, never silent).
+      Low parse confidence lowers credibility (verification_warning + answer caveat) while
+      the tri-state wall stays intact (grounded stays grounded). Tests: `tests/test_ingestion_docling.py`.
 
 ## Phase 2 — ChatGPT-class UI
 

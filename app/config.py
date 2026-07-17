@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     enable_rerank: bool = True
 
+    # --- Ingestion (PDF parsing) -------------------------------------------
+    # Which PDF parser to use. "auto" uses Docling when it's installed (robust tables /
+    # multi-column / OCR for messy real-world PDFs), else the deterministic pypdf "basic"
+    # parser. "basic" forces pypdf (offline/CI default — no torch); "docling" forces Docling
+    # with a per-file fallback to basic. Docling is an optional heavy dependency
+    # (requirements-ml.txt / Docker INSTALL_ML=true).
+    pdf_parser: str = "auto"  # auto | docling | basic
+    # A cited passage whose parse_confidence is below this (scanned / complex layout) makes
+    # the answer carry a "verify against the original" caveat — it stays grounded (it IS
+    # cited), but the low-confidence parse is surfaced, never silently trusted.
+    parse_confidence_warn: float = 0.55
+
     # --- Vector store ------------------------------------------------------
     vector_backend: str = "numpy"  # numpy | qdrant
     qdrant_url: str = "http://qdrant:6333"

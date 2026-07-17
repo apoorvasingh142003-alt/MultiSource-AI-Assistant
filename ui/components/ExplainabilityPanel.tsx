@@ -25,14 +25,14 @@ function StepChip({
         {step.step === "generation" && <Icons.spark className="h-4 w-4" />}
         {step.step === "verification" && <Icons.shield className="h-4 w-4" />}
       </div>
-      <span className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+      <span className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
         {step.step.replace("_", " ")}
       </span>
-      <span className="mt-0.5 text-[11px] text-slate-600">
+      <span className="mt-0.5 text-[11px] text-body">
         {step.duration_ms}ms
       </span>
       {step.decision && (
-        <span className="mt-0.5 text-[10px] text-slate-400 max-w-[80px] truncate">
+        <span className="mt-0.5 text-[10px] text-faint max-w-[80px] truncate">
           {step.decision}
         </span>
       )}
@@ -56,7 +56,7 @@ function StepFlow({ steps }: { steps: GenerationStep[] }) {
         <React.Fragment key={s.step}>
           <StepChip step={s} color={STEP_COLORS[s.step] ?? "bg-slate-500"} />
           {i < steps.length - 1 && (
-            <div className="mt-4 flex items-center px-1 text-slate-300">
+            <div className="mt-4 flex items-center px-1 text-faint">
               <Icons.arrowR className="h-3.5 w-3.5" />
             </div>
           )}
@@ -94,7 +94,7 @@ function ContributionBar({
       {entries.map(([name, { pct, kind }], i) => (
         <div key={name}>
           <div className="mb-1 flex items-center justify-between">
-            <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-slate-700">
+            <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-fg">
               {kind === "relational" ? (
                 <Icons.db className="h-3 w-3 text-sky-500" />
               ) : (
@@ -102,9 +102,9 @@ function ContributionBar({
               )}
               {name}
             </span>
-            <span className="text-[11px] font-semibold text-slate-500">{pct}%</span>
+            <span className="text-[11px] font-semibold text-muted">{pct}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-2 overflow-hidden rounded-full bg-surface-2">
             <div
               className={cn("h-full rounded-full transition-all", colors[i % colors.length])}
               style={{ width: `${pct}%` }}
@@ -120,10 +120,10 @@ function ContributionBar({
 function TrustItem({ e }: { e: Evidence }) {
   const tf = e.trust_factors;
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-2.5">
+    <div className="rounded-lg border border-line bg-surface-2/50 p-2.5">
       <div className="flex items-center justify-between">
-        <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-slate-700">
-          <span className="rounded bg-indigo-50 px-1 py-0.5 font-mono text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-200">
+        <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-fg">
+          <span className="rounded bg-indigo-50 px-1 py-0.5 font-mono text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30">
             {e.id}
           </span>
           {e.citation_label}
@@ -133,16 +133,21 @@ function TrustItem({ e }: { e: Evidence }) {
         )}
       </div>
       {tf && (
-        <div className="mt-1.5 flex flex-wrap gap-2 text-[10.5px] text-slate-500">
+        <div className="mt-1.5 flex flex-wrap gap-2 text-[10.5px] text-muted">
           {tf.retrieval_score != null && (
             <span>retrieval: {tf.retrieval_score.toFixed(3)}</span>
           )}
           {tf.rerank_score != null && (
             <span>rerank: {tf.rerank_score.toFixed(3)}</span>
           )}
+          {tf.parse_confidence != null && (
+            <Pill tone={tf.parse_confidence >= 0.8 ? "emerald" : tf.parse_confidence >= 0.55 ? "amber" : "rose"}>
+              parse {Math.round(tf.parse_confidence * 100)}%
+            </Pill>
+          )}
           {tf.is_primary_source && <Pill tone="emerald">primary</Pill>}
           {tf.trust_summary && (
-            <span className="text-slate-400">{tf.trust_summary}</span>
+            <span className="text-faint">{tf.trust_summary}</span>
           )}
         </div>
       )}
@@ -160,7 +165,7 @@ function CitationMap({ answer, evidence }: { answer: string; evidence: Evidence[
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {/* left: answer with clickable citations */}
-      <div className="rounded-lg border border-slate-200 bg-white p-3 text-[12.5px] leading-relaxed text-slate-700">
+      <div className="rounded-lg border border-line bg-surface p-3 text-[12.5px] leading-relaxed text-body">
         {tokens.map((tok, i) => {
           const m = tok.match(/^\[(e\d+)\]$/);
           if (m && byId.has(m[1])) {
@@ -173,7 +178,7 @@ function CitationMap({ answer, evidence }: { answer: string; evidence: Evidence[
                   "mx-0.5 rounded px-1 text-[10px] font-bold ring-1 transition",
                   active === id
                     ? "bg-indigo-600 text-white ring-indigo-600"
-                    : "bg-indigo-50 text-indigo-600 ring-indigo-200 hover:bg-indigo-100"
+                    : "bg-indigo-50 text-indigo-600 ring-indigo-200 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30"
                 )}
               >
                 {id}
@@ -191,15 +196,15 @@ function CitationMap({ answer, evidence }: { answer: string; evidence: Evidence[
             className={cn(
               "rounded-lg border p-2.5 text-[11.5px] leading-relaxed transition",
               active === e.id
-                ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-200"
-                : "border-slate-200 bg-slate-50/40"
+                ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-200 dark:bg-indigo-500/10 dark:ring-indigo-500/30"
+                : "border-line bg-surface-2/40"
             )}
           >
             <div className="mb-1 flex items-center gap-1.5">
-              <span className="rounded bg-indigo-50 px-1 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-200">{e.id}</span>
-              <span className="truncate font-medium text-slate-500">{e.citation_label}</span>
+              <span className="rounded bg-indigo-50 px-1 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30">{e.id}</span>
+              <span className="truncate font-medium text-muted">{e.citation_label}</span>
             </div>
-            <p className="line-clamp-4 text-slate-600">{e.content}</p>
+            <p className="line-clamp-4 text-body">{e.content}</p>
           </div>
         ))}
       </div>
@@ -227,7 +232,7 @@ export default function ExplainabilityPanel({
       {/* Step flowchart */}
       {steps.length > 0 && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             Pipeline Steps
           </h4>
           <StepFlow steps={steps} />
@@ -237,7 +242,7 @@ export default function ExplainabilityPanel({
       {/* Source contribution */}
       {usedEvidence.length > 0 && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             Source Contribution
           </h4>
           <ContributionBar evidence={t.evidence} />
@@ -247,7 +252,7 @@ export default function ExplainabilityPanel({
       {/* Trust details */}
       {usedEvidence.some((e) => e.trust_factors || e.contribution_percentage != null) && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             Trust Details
           </h4>
           <div className="space-y-1.5">
@@ -261,14 +266,14 @@ export default function ExplainabilityPanel({
       {/* SQL details (only for SQL/HYBRID) */}
       {t.sql_executions.length > 0 && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             SQL Details
           </h4>
           <div className="space-y-2">
             {t.sql_executions.map((s, i) => (
               <div
                 key={i}
-                className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5"
+                className="rounded-lg border border-line bg-surface-2/60 p-2.5"
               >
                 <div className="flex items-center gap-2 mb-1.5">
                   <Pill tone="sky">{s.purpose}</Pill>
@@ -290,7 +295,7 @@ export default function ExplainabilityPanel({
       {/* Citation Map (Section 6.2e) */}
       {usedEvidence.length > 0 && /\[e\d+\]/.test(resp.answer) && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             Citation Map
           </h4>
           <CitationMap answer={resp.answer} evidence={usedEvidence} />
@@ -300,7 +305,7 @@ export default function ExplainabilityPanel({
       {/* Timing summary */}
       {t.timings.length > 0 && (
         <div>
-          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
             Timing Breakdown
           </h4>
           {(() => {
@@ -309,14 +314,14 @@ export default function ExplainabilityPanel({
               <div className="space-y-1.5">
                 {t.timings.map((tm) => (
                   <div key={tm.name} className="flex items-center gap-3">
-                    <span className="w-32 shrink-0 truncate text-[11.5px] font-medium text-slate-600">{tm.name}</span>
-                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <span className="w-32 shrink-0 truncate text-[11.5px] font-medium text-body">{tm.name}</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
                       <span
                         className="block h-full rounded-full bg-indigo-400"
                         style={{ width: `${Math.max(4, (tm.duration_ms / maxMs) * 100)}%` }}
                       />
                     </span>
-                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-slate-500">{tm.duration_ms} ms</span>
+                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-muted">{tm.duration_ms} ms</span>
                   </div>
                 ))}
               </div>

@@ -342,6 +342,39 @@ class Orchestrator:
                 "\n\n⚠️ Note: Some sources contain conflicting information. "
                 "See the Explainability panel for details."
             )
+
+        # PARSE-CONFIDENCE CAVEAT (Phase 1 / Docling): if a *cited* passage came from a
+        # low-confidence parse (scanned / complex layout), the answer stays GROUNDED — it
+        # is genuinely cited — but we surface the parse risk explicitly rather than letting
+        # a shaky extraction read as a confident citation. This is a caveat WITHIN the
+        # grounded state; it never blends grounded ↔ reasoned (the tri-state wall is intact).
+        if not insufficient:
+            cited_ids = set(check.cited_ids)
+            warn_floor = self.documents.index.s.parse_confidence_warn
+            low_conf = [
+                e for e in evidence
+                if e.id in cited_ids and e.parse_confidence is not None
+                and e.parse_confidence < warn_floor
+            ]
+            if low_conf:
+                worst = min(e.parse_confidence for e in low_conf)
+                trace.notes.append(
+                    f"Parse-confidence caveat: {len(low_conf)} cited passage(s) came from a "
+                    f"low-confidence parse (min {worst:.0%})."
+                )
+                if not verification_warning:
+                    verification_warning = (
+                        "Some cited passages came from a low-confidence parse (a scanned or "
+                        "complex-layout document). Verify against the original."
+                    )
+                answer = answer.rstrip() + (
+                    f"\n\n⚠️ Note: {len(low_conf)} cited passage(s) came from a "
+                    f"low-confidence parse (min {worst:.0%}) — verify against the original document."
+                )
+                # nudge the hallucination-risk score to reflect the shaky extraction
+                hallucination_risk = round(
+                    min(1.0, hallucination_risk + 0.5 * (1.0 - worst)), 3
+                )
         trace.generation_steps.append(GenerationStep(
             step="verification",
             decision="verified" if check.verified else "issues",

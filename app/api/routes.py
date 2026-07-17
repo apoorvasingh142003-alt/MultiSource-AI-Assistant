@@ -25,6 +25,7 @@ from app.integrations import hubspot as hs
 from app.config import get_settings
 from app.db.migrations import get_session_db
 from app.engine import get_engine
+from app.ingestion.parsers import active_parser_name
 from app.models import (AskRequest, AskResponse, ExampleQuestion, IngestResult,
                         Inventory, RouteDecision, SourceInfo, Trace)
 from app.roles import list_roles
@@ -134,6 +135,7 @@ def config() -> dict:
         "has_api_key": s.has_api_key,
         "model_mode": runtime.get_mode(),
         "cache_first": s.cache_first,
+        "pdf_parser": active_parser_name(),
     }
 
 

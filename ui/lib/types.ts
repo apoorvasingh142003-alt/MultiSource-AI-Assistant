@@ -19,6 +19,7 @@ export interface TrustFactors {
   recency_score?: number;
   retrieval_score?: number;
   rerank_score?: number;
+  parse_confidence?: number | null;
   is_primary_source?: boolean;
   trust_summary?: string;
 }
@@ -30,6 +31,8 @@ export interface Evidence {
   content: string;
   citation_label: string;
   score?: number | null;
+  parse_confidence?: number | null;
+  parser?: string | null;
   language?: string | null;
   origin?: "sample" | "uploaded" | null;
   contribution_percentage?: number | null;
@@ -273,6 +276,9 @@ export interface IngestedDocumentInfo {
   pages?: number | null;
   ingestion_ms: number;
   error?: string | null;
+  // Phase 1 (Docling): document-level parse confidence (0..1) + parser used.
+  parse_confidence?: number | null;
+  parser?: string | null;
 }
 
 export interface IngestedDatabaseInfo {
