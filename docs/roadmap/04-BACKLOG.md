@@ -56,15 +56,29 @@ user-visible gain, and the library isn't a locked decision (the exit criteria ar
 
 ## Phase 3 — Tri-state answers + generative components
 
-- [ ] Prominent tri-state label component (grounded+cited / reasoned-advice / insufficient) —
-      never a calm/positive state for ungrounded. (Extend `VerificationBadge.tsx`.)
-- [ ] Clickable citations → highlight evidence in the panel.
-- [ ] Generative UI tools (AI SDK) → React components, streamed:
-  - [ ] Cited **table** from SQL rows + copy/export (extend `AnswerTable.tsx`).
-  - [ ] **Chart** (Recharts/Tremor).
-  - [ ] **Timeline**.
-  - [ ] **Document/clause artifact** in the side panel.
-- [ ] Intent → component selection (extend `app/retrieval/intent.py`).
+See [plans/03-COMPONENTS-plan.md](plans/03-COMPONENTS-plan.md). **Stack note (consistent with
+Phase 2):** components ride the existing custom-SSE `done` payload as a new
+`AskResponse.components` array (no Vercel AI SDK data-stream protocol); charts/timelines are
+self-contained SVG (no Recharts/Tremor dep). Components are built **deterministically** from
+the trace's SQL rows / evidence in the one `Engine._finalize` chokepoint, **grounded-only** —
+so the wall is never dressed up as a confident chart, and every path gets them for free.
+
+- [x] Prominent tri-state label component (grounded+cited / reasoned-advice / insufficient) —
+      never a calm/positive state for ungrounded. Shipped in Phase 2 (`AnswerStateChip.tsx` on
+      every message + full `AnswerStateBanner.tsx` in the inspector, driven by backend
+      `answer_state`); verified prominent + wall-safe this phase.
+- [x] Clickable citations → highlight evidence in the panel (`[eN]` in prose AND on every
+      component's cited-footer → `openCitation` → inspector scroll + `cite-pulse`).
+- [x] Generative UI tools → React components, rendered under the streamed prose:
+  - [x] Cited **table** from SQL rows + copy/export — `AnswerComponent(kind="table")` from the
+        primary SQL execution, rendered via `AnswerTable.tsx` (sort/paginate/CSV/TSV) with a
+        cited footer. Suppresses the model's duplicate markdown table.
+  - [x] **Chart** — self-contained SVG bar chart (`GenerativeComponents.tsx`), no chart lib.
+  - [x] **Timeline** — self-contained vertical SVG-accented timeline, chronological.
+  - [x] **Document/clause artifact** — verbatim top cited passage in a titled card.
+- [x] Intent → component selection (`app/retrieval/intent.py::detect_component_intent` +
+      `app/generation/components.py::build_components`). A false cue never invents a component —
+      one is emitted only when the trace actually has the data to back it.
 
 ## Phase 4 — Agentic iterative retrieval
 

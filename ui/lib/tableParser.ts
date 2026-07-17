@@ -113,6 +113,21 @@ export function segmentAnswer(text: string): AnswerSegment[] {
 }
 
 /**
+ * Remove every markdown table from a text block, collapsing the surrounding whitespace.
+ * Used when a structured (cited) table component already renders the same rows, so the
+ * model's inline markdown table isn't shown twice.
+ */
+export function stripMarkdownTables(text: string): string {
+  const segments = segmentAnswer(text);
+  return segments
+    .filter((s) => s.type === "text")
+    .map((s) => (s.type === "text" ? s.content : ""))
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
  * Export table data as CSV.
  */
 export function toCSV(headers: string[], rows: string[][]): string {

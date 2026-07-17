@@ -202,12 +202,51 @@ export interface Trace {
   agent_trace?: AgentTrace | null;
 }
 
+/* ---------------- generative components (Phase 3) ---------------- */
+// A structured view over GROUNDED evidence the chat renders inline (cited table / chart /
+// timeline / clause artifact). Built deterministically on the backend from the same
+// evidence the wall verified — never for a reasoned/insufficient answer. Mirrors
+// app/models.py::AnswerComponent.
+export type ComponentKind = "table" | "chart" | "timeline" | "artifact";
+
+export interface TimelineEvent {
+  date: string;
+  title: string;
+  details?: string;
+}
+
+export interface ChartPoint {
+  label: string;
+  value: number;
+}
+
+export interface AnswerComponent {
+  kind: ComponentKind;
+  title: string;
+  caption?: string;
+  evidence_ids: string[];
+  // table
+  columns: string[];
+  rows: string[][];
+  // chart
+  chart_kind?: string;
+  x_label?: string;
+  y_label?: string;
+  points: ChartPoint[];
+  // timeline
+  events: TimelineEvent[];
+  // artifact
+  subtitle?: string;
+  body?: string;
+}
+
 export interface AskResponse {
   question: string;
   answer: string;
   insufficient: boolean;
   answer_state?: AnswerState;
   citations: Evidence[];
+  components?: AnswerComponent[];
   trace: Trace;
   verification_warning?: string | null;
   hallucination_risk_score?: number | null;

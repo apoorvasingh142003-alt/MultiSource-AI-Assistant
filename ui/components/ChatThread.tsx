@@ -4,9 +4,10 @@ import type { AskResponse } from "@/lib/types";
 import type { AgentStep } from "@/lib/api";
 import { Icons, RouteBadge, cn } from "./ui";
 import { CitedText, CitationChips } from "./trace";
-import { segmentAnswer } from "@/lib/tableParser";
+import { segmentAnswer, stripMarkdownTables } from "@/lib/tableParser";
 import AnswerTable from "./AnswerTable";
 import AnswerStateChip from "./AnswerStateChip";
+import GenerativeComponents from "./GenerativeComponents";
 import type { InspectorTab } from "./InspectorPanel";
 
 export interface ChatTurn {
@@ -191,7 +192,13 @@ function AssistantAnswer({
   onRegenerate: (turn: ChatTurn) => void;
 }) {
   const rtl = /[֐-׿]/.test(resp.answer);
-  const segments = segmentAnswer(resp.answer);
+  const components = resp.components ?? [];
+  // When the backend already emits a structured (cited) table component, don't ALSO render
+  // the model's inline markdown table — the structured one is authoritative and cited.
+  const hasStructuredTable = components.some((c) => c.kind === "table");
+  const segments = hasStructuredTable
+    ? [{ type: "text" as const, content: stripMarkdownTables(resp.answer) }]
+    : segmentAnswer(resp.answer);
   const hasTables = segments.some((s) => s.type === "table");
 
   return (
@@ -226,6 +233,15 @@ function AssistantAnswer({
         </div>
       ) : (
         <CitedText text={resp.answer} onCite={(id) => onCite(turn, id)} rtl={rtl} />
+      )}
+
+      {/* generative components — cited table / chart / timeline / clause artifact.
+          Grounded-only (the backend never emits them for reasoned/insufficient). */}
+      {components.length > 0 && (
+        <GenerativeComponents
+          components={components} citations={resp.citations}
+          onCite={(id) => onCite(turn, id)} onInspect={() => onInspect(turn, "answer")}
+        />
       )}
 
       {/* source chips */}

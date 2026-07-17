@@ -201,6 +201,43 @@ class AskRequest(BaseModel):
     conversation_history: Optional[list[dict[str, Any]]] = None
 
 
+class AnswerComponent(BaseModel):
+    """A generative UI component the frontend renders inline beside the answer text —
+    a cited table, chart, timeline, or document/clause artifact (Phase 3).
+
+    Components are computed *deterministically from the trace* (SQL rows, retrieved
+    passages) — never invented by the model — and are only ever built for a GROUNDED
+    answer, so a chart/table/timeline can never lend confident structure to reasoned or
+    insufficient output. This keeps the tri-state grounding wall intact: structure is a
+    view over grounded evidence, not a new, unlabelled answer stream.
+
+    ``evidence_ids`` link every component back to the exact ``Evidence`` it was built
+    from, so a click on the component opens the same cited evidence in the inspector.
+    """
+
+    kind: Literal["table", "chart", "timeline", "artifact"]
+    title: str = ""
+    subtitle: str = ""                               # secondary line (e.g. an artifact's source label)
+    caption: str = ""                                # short provenance line ("12 rows from invoices")
+    evidence_ids: list[str] = Field(default_factory=list)
+
+    # table payload
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+    # chart
+    chart_kind: str = "bar"                           # currently "bar"
+    x_label: str = ""                                 # category axis label
+    y_label: str = ""                                 # numeric axis label
+    points: list[dict[str, Any]] = Field(default_factory=list)  # [{label, value}]
+
+    # timeline
+    events: list[dict[str, Any]] = Field(default_factory=list)  # [{date, title, details}]
+
+    # artifact (a quoted document clause / section)
+    body: str = ""
+
+
 class AskResponse(BaseModel):
     question: str
     answer: str
@@ -210,6 +247,9 @@ class AskResponse(BaseModel):
     # three states blend. "grounded" is the default; the engine overwrites it per answer.
     answer_state: AnswerState = "grounded"
     citations: list[Evidence] = Field(default_factory=list)
+    # Generative UI components (Phase 3) — deterministic views over the grounded evidence
+    # (cited table / chart / timeline / clause artifact). Empty for reasoned/insufficient.
+    components: list[AnswerComponent] = Field(default_factory=list)
     trace: Trace
     # --- new fields (Sections 8, 10) ---
     verification_warning: Optional[str] = None

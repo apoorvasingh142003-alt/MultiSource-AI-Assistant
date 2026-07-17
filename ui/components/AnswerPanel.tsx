@@ -3,8 +3,9 @@ import React from "react";
 import type { AskResponse } from "@/lib/types";
 import { Button, Card, Icons, Pill, RouteBadge, SectionTitle, cn, isRTL } from "./ui";
 import { CitationChips, CitedText, EvidenceItem, useCiteHighlight } from "./trace";
-import { segmentAnswer } from "@/lib/tableParser";
+import { segmentAnswer, stripMarkdownTables } from "@/lib/tableParser";
 import AnswerTable from "./AnswerTable";
+import GenerativeComponents from "./GenerativeComponents";
 import ReadAloud from "./ReadAloud";
 import VerificationBadge from "./VerificationBadge";
 import AnswerStateBanner from "./AnswerStateBanner";
@@ -46,8 +47,14 @@ export default function AnswerPanel({
     return () => window.removeEventListener("aba:toggle-explain", toggle);
   }, []);
 
-  // Parse answer segments for table detection
-  const segments = segmentAnswer(resp.answer);
+  // Parse answer segments for table detection. When the backend emits a structured
+  // (cited) table component, drop the model's inline markdown table — the structured one
+  // is authoritative and cited.
+  const components = resp.components ?? [];
+  const hasStructuredTable = components.some((c) => c.kind === "table");
+  const segments = hasStructuredTable
+    ? [{ type: "text" as const, content: stripMarkdownTables(resp.answer) }]
+    : segmentAnswer(resp.answer);
   const hasTables = segments.some((s) => s.type === "table");
 
   const copyAnswer = async () => {
@@ -139,6 +146,14 @@ export default function AnswerPanel({
           </div>
         ) : (
           <CitedText text={resp.answer} onCite={onCite} rtl={rtlAnswer} />
+        )}
+
+        {/* generative components — cited table / chart / timeline / clause artifact
+            (grounded-only, built on the backend from the same evidence). */}
+        {components.length > 0 && (
+          <div className="mt-4">
+            <GenerativeComponents components={components} citations={resp.citations} onCite={onCite} />
+          </div>
         )}
 
         {resp.citations.length > 0 && (

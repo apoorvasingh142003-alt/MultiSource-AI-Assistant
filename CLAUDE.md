@@ -84,6 +84,15 @@ suite runs deterministically without a key or auth.
 **citation verification** (`app/generation/verify.py`: every `[eN]` in the answer must trace to retrieved evidence).
 Everything is recorded into a single `Trace` (`app/models.py`) that every UI panel renders.
 
+- **Generative components (Phase 3)** (`app/generation/components.py`): after the label is
+  computed, `Engine._finalize` derives a deterministic `AskResponse.components` list (cited
+  **table** from the primary SQL result, SVG **bar chart**, **timeline**, document/clause
+  **artifact**) from the *same* trace evidence — no LLM call. `app/retrieval/intent.py::detect_component_intent`
+  picks chart/timeline/table from the question. Gated on `answer_state == "grounded"`: a
+  reasoned/insufficient answer never renders a confident-looking chart (the wall holds). The
+  UI renders them under the streamed prose (`ui/components/GenerativeComponents.tsx`), and a
+  present structured table suppresses the model's inline markdown table (the cited one wins).
+
 - **Document branch** (`app/retrieval/`): dense embeddings + BM25 → RRF fusion (`fusion.py`) →
   optional cross-encoder rerank (`rerank.py`) → semantic keep-ratio gate. `document_retriever.py`
   owns the hybrid `DocumentIndex`; `vector_store.py` has numpy (default) + Qdrant backends.

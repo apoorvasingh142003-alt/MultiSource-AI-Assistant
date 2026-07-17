@@ -22,6 +22,7 @@ from app.ingestion.sqlite_introspect import SchemaInfo, introspect
 from app.ingestion.sqlite_register import copy_seed, merge_sqlite
 from app.models import (ExampleQuestion, IngestedDatabaseInfo, IngestedDocumentInfo,
                         Inventory, SourceInfo, TableInfo, compute_answer_state)
+from app.generation.components import build_components
 from app.retrieval.document_retriever import DocumentIndex
 from app.routing.orchestrator import Orchestrator
 from app.sources.crm_source import CrmSource
@@ -312,11 +313,18 @@ class Engine:
             return self._finalize(resp)
 
     def _finalize(self, resp):
-        """Common tail for every answer path: stamp evidence provenance and compute the
-        tri-state grounding label once, so no path can forget it or disagree on the label."""
+        """Common tail for every answer path: stamp evidence provenance, compute the
+        tri-state grounding label once, then build the inline generative components — all
+        at this single chokepoint so no path can forget them or disagree on the label."""
         self._stamp_origin(resp.trace.evidence)
         resp.answer_state = compute_answer_state(
             resp.answer, resp.trace.route, resp.trace.evidence, resp.insufficient
+        )
+        # Generative components (cited table / chart / timeline / artifact) — deterministic,
+        # built from the same evidence the wall verified, and gated on `grounded` inside
+        # build_components so an ungrounded answer never renders a confident-looking chart.
+        resp.components = build_components(
+            resp.question, resp.answer_state, resp.trace, resp.trace.evidence
         )
         return resp
 
