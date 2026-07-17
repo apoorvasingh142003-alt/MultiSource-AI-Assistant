@@ -190,6 +190,7 @@ def ask(req: AskRequest, user: CurrentUser) -> AskResponse:
             answer="We hit an unexpected error while processing this question. "
                    "Please try rephrasing it, or try again in a moment.",
             insufficient=True,
+            answer_state="insufficient",
             citations=[],
             trace=Trace(
                 question=question,

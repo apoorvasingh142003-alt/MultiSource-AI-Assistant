@@ -21,7 +21,7 @@ from app.ingestion.pdf import ingest_pdf, ingest_pdf_dir
 from app.ingestion.sqlite_introspect import SchemaInfo, introspect
 from app.ingestion.sqlite_register import copy_seed, merge_sqlite
 from app.models import (ExampleQuestion, IngestedDatabaseInfo, IngestedDocumentInfo,
-                        Inventory, SourceInfo, TableInfo)
+                        Inventory, SourceInfo, TableInfo, compute_answer_state)
 from app.retrieval.document_retriever import DocumentIndex
 from app.routing.orchestrator import Orchestrator
 from app.sources.crm_source import CrmSource
@@ -282,8 +282,7 @@ class Engine:
                         conversation_history=conversation_history, on_token=on_token,
                         on_event=on_event,
                     )
-                    self._stamp_origin(resp.trace.evidence)
-                    return resp
+                    return self._finalize(resp)
 
             # Multi-agent decomposition (Section 10): triggered explicitly or by a
             # multi-part heuristic. Runs the full pipeline per sub-question, then synthesizes.
@@ -308,8 +307,16 @@ class Engine:
                     conversation_history=conversation_history,
                     on_token=on_token,
                 )
-            self._stamp_origin(resp.trace.evidence)
-            return resp
+            return self._finalize(resp)
+
+    def _finalize(self, resp):
+        """Common tail for every answer path: stamp evidence provenance and compute the
+        tri-state grounding label once, so no path can forget it or disagree on the label."""
+        self._stamp_origin(resp.trace.evidence)
+        resp.answer_state = compute_answer_state(
+            resp.answer, resp.trace.route, resp.trace.evidence, resp.insufficient
+        )
+        return resp
 
     def _scope_sources(self, scope: str):
         """Resolve a scope to the document names + table names it may use.
@@ -329,7 +336,8 @@ class Engine:
                "questions about your own data. (Open the Demo tab to see the assistant working "
                "on sample contracts and a business database.)")
         return AskResponse(
-            question=question, answer=msg, insufficient=True, citations=[],
+            question=question, answer=msg, insufficient=True, answer_state="insufficient",
+            citations=[],
             trace=Trace(
                 question=question,
                 route=RouteDecision(route="NONE", reasoning="Empty workspace — no uploaded sources yet.",

@@ -7,6 +7,7 @@ import { segmentAnswer } from "@/lib/tableParser";
 import AnswerTable from "./AnswerTable";
 import ReadAloud from "./ReadAloud";
 import VerificationBadge from "./VerificationBadge";
+import AnswerStateBanner from "./AnswerStateBanner";
 import ExplainabilityPanel from "./ExplainabilityPanel";
 import MultiAgentTrace from "./MultiAgentTrace";
 
@@ -29,9 +30,9 @@ export default function AnswerPanel({
 
   const [showExplain, setShowExplain] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
-  const isGK = t.route?.route === "GENERAL_KNOWLEDGE";
   const risk = resp.hallucination_risk_score;
-  const showRisk = risk != null && risk >= 0.4;
+  // The tri-state grounding wall — the single explicit label the backend computed.
+  const state = resp.answer_state ?? (resp.insufficient ? "insufficient" : "grounded");
   // Grounding-first: the router can return NONE yet the document safety net recovers a real,
   // grounded answer. Without this, the "NONE · Insufficient evidence" badge would contradict
   // the cited answer shown below it.
@@ -61,7 +62,7 @@ export default function AnswerPanel({
       <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <Icons.route className="h-4 w-4 text-indigo-500" />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-400">Routed to</span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-faint">Routed to</span>
           {t.route ? <RouteBadge route={t.route.route} withLabel /> : <Pill>—</Pill>}
           {recoveredFromDocs && (
             <span title="The router declined, but a direct document search recovered a grounded, cited answer.">
@@ -74,7 +75,7 @@ export default function AnswerPanel({
         </div>
         {t.route && (
           <span
-            className="text-[12px] text-slate-500"
+            className="text-[12px] text-muted"
             title="How confident the router was about which source to use — not a measure of answer correctness."
           >
             {(t.route.confidence * 100).toFixed(0)}% router confidence
@@ -82,7 +83,7 @@ export default function AnswerPanel({
           </span>
         )}
         {retrievalSummary && (
-          <span className="flex items-center gap-1.5 text-[12px] text-slate-500">
+          <span className="flex items-center gap-1.5 text-[12px] text-muted">
             <Icons.search className="h-3.5 w-3.5 text-sky-500" />{retrievalSummary}
           </span>
         )}
@@ -92,34 +93,21 @@ export default function AnswerPanel({
         </span>
       </Card>
 
-      {/* Ungrounded / model-knowledge warning — prominent, full-width */}
-      {isGK && (
-        <div
-          role="alert"
-          className="flex items-start gap-2.5 rounded-2xl bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/30"
-        >
-          <Icons.alert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
-          <span className="leading-relaxed">
-            Not grounded in your sources — model knowledge, may be inaccurate.
-            {showRisk && (
-              <span className="ml-1.5 inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300 dark:bg-amber-500/20 dark:text-amber-100 dark:ring-amber-400/30">
-                hallucination risk {(risk! * 100).toFixed(0)}%
-              </span>
-            )}
-          </span>
-        </div>
-      )}
+      {/* The tri-state grounding wall — prominent, full-width, one unmistakable label. */}
+      <AnswerStateBanner resp={resp} riskPct={risk != null ? risk * 100 : null} />
 
       {/* Verification warning */}
       {resp.verification_warning && (
-        <Card className="flex items-start gap-2 px-4 py-3 text-[13px] text-amber-700 ring-1 ring-amber-200">
+        <Card className="flex items-start gap-2 px-4 py-3 text-[13px] text-amber-700 ring-1 ring-amber-200 dark:text-amber-300 dark:ring-amber-500/30">
           <Icons.alert className="mt-0.5 h-4 w-4 shrink-0" />
           {resp.verification_warning}
         </Card>
       )}
 
       {/* answer */}
-      <Card className={cn("p-5", resp.insufficient && "ring-1 ring-amber-200")}>
+      <Card className={cn("p-5",
+        state === "insufficient" && "ring-1 ring-slate-200 dark:ring-white/10",
+        state === "reasoned" && "ring-1 ring-amber-200 dark:ring-amber-500/30")}>
         <div className="mb-3 flex items-center justify-between">
           <SectionTitle>Answer</SectionTitle>
           <div className="flex items-center gap-1.5">
@@ -138,10 +126,6 @@ export default function AnswerPanel({
             )}
           </div>
         </div>
-        {resp.insufficient && (
-          <div className="mb-3"><Pill tone="amber"><Icons.alert className="h-3 w-3" />Insufficient evidence — not answered</Pill></div>
-        )}
-
         {/* Render answer with inline tables */}
         {hasTables ? (
           <div>
@@ -158,7 +142,7 @@ export default function AnswerPanel({
         )}
 
         {resp.citations.length > 0 && (
-          <div className="mt-4 border-t border-slate-100 pt-3.5">
+          <div className="mt-4 border-t border-line pt-3.5">
             <SectionTitle>Sources</SectionTitle>
             <CitationChips citations={resp.citations} onCite={onCite} />
           </div>
@@ -181,16 +165,16 @@ export default function AnswerPanel({
           </SectionTitle>
           <div className="space-y-2">
             {resp.agent_trace.steps.map((s, i) => (
-              <div key={i} className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+              <div key={i} className="rounded-xl border border-line bg-surface-2/60 p-2.5">
                 <div className="flex items-center gap-2 text-[12px]">
                   <Pill tone="indigo">step {s.iteration}</Pill>
-                  <span className="font-mono text-[11px] text-indigo-600">{s.tool}</span>
+                  <span className="font-mono text-[11px] text-indigo-600 dark:text-indigo-300">{s.tool}</span>
                   {typeof (s.args as any)?.query === "string" && (
-                    <span className="truncate text-slate-500">“{String((s.args as any).query)}”</span>
+                    <span className="truncate text-muted">“{String((s.args as any).query)}”</span>
                   )}
                 </div>
                 {s.observation && (
-                  <p className="mt-1.5 whitespace-pre-wrap text-[11.5px] leading-relaxed text-slate-500">{s.observation}</p>
+                  <p className="mt-1.5 whitespace-pre-wrap text-[11.5px] leading-relaxed text-muted">{s.observation}</p>
                 )}
               </div>
             ))}
@@ -202,7 +186,7 @@ export default function AnswerPanel({
       {supporting.length > 0 && (
         <Card className="p-4">
           <SectionTitle hint={supportingHint}>Supporting evidence</SectionTitle>
-          <p className="-mt-1 mb-2.5 text-[11.5px] text-slate-400">
+          <p className="-mt-1 mb-2.5 text-[11.5px] text-faint">
             The exact passages and records this answer is grounded in.
             {supporting.length < t.evidence.length && " Open the trace to see everything that was retrieved."}
           </p>
