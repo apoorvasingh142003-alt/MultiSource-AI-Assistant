@@ -32,9 +32,12 @@ def main() -> int:
         cited = resp.trace.citation_check.verified if resp.trace.citation_check else False
 
         if ex.route == "NONE":
-            ok = route_ok and resp.insufficient
+            # The tri-state wall: an unanswerable question must land on the honest decline.
+            ok = route_ok and resp.insufficient and resp.answer_state == "insufficient"
         else:
-            ok = route_ok and ev > 0 and cited and not resp.insufficient
+            # An answerable question must be grounded+cited — never silently "reasoned".
+            ok = (route_ok and ev > 0 and cited and not resp.insufficient
+                  and resp.answer_state == "grounded")
         passed += ok
         flag = "✓" if ok else "✗"
         print(f"{ex.route:>7} {route:>7}  {flag:>2}  {ev:>3}  {str(cited):>5}  {ex.question[:64]}")
@@ -71,8 +74,11 @@ def main() -> int:
     try:
         gprobe = "What do our contracts say about suspension?"
         gresp = eng.ask(gprobe)
+        # The safety net must recover a GROUNDED, cited answer — the tri-state label must
+        # NOT flip to "reasoned" just because the router was (wrongly) forced to GK.
         grounded = (bool(gresp.trace.evidence) and not gresp.insufficient
-                    and "not grounded" not in gresp.answer.lower())
+                    and "not grounded" not in gresp.answer.lower()
+                    and gresp.answer_state == "grounded")
     finally:
         _orch.classify = _real_classify
     passed += grounded

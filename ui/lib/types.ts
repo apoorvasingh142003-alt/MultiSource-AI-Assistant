@@ -2,6 +2,9 @@
 
 export type Route = "PDF" | "SQL" | "HYBRID" | "NONE" | "GENERAL_KNOWLEDGE";
 export type SourceKind = "documents" | "relational" | "api";
+// The tri-state grounding wall (see app/models.py::AnswerState). The one label the UI
+// renders — grounded/reasoned/insufficient are never blended into one confident stream.
+export type AnswerState = "grounded" | "reasoned" | "insufficient";
 
 /* ---------------- role adaptation ---------------- */
 export interface RoleInfo {
@@ -200,6 +203,7 @@ export interface AskResponse {
   question: string;
   answer: string;
   insufficient: boolean;
+  answer_state?: AnswerState;
   citations: Evidence[];
   trace: Trace;
   verification_warning?: string | null;

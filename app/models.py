@@ -13,6 +13,14 @@ from pydantic import BaseModel, Field
 SourceKind = Literal["documents", "relational", "api"]
 Route = Literal["PDF", "SQL", "HYBRID", "NONE", "GENERAL_KNOWLEDGE"]
 
+# The tri-state grounding wall (the product moat). Every answer is exactly one of these,
+# and the three are NEVER blended into one confident stream:
+#   grounded     — every claim traces to retrieved evidence ([eN]), citation-verified.
+#   reasoned     — general/model knowledge or labelled advice; explicitly NOT from the
+#                  user's sources. Used for design/strategy/recommendation questions.
+#   insufficient — the honest decline: it says it doesn't know rather than guessing.
+AnswerState = Literal["grounded", "reasoned", "insufficient"]
+
 
 class Evidence(BaseModel):
     """A single, fully-attributed piece of evidence used to ground the answer."""
@@ -195,6 +203,10 @@ class AskResponse(BaseModel):
     question: str
     answer: str
     insufficient: bool = False
+    # The tri-state grounding wall — the single, explicit label the UI renders. Computed
+    # centrally (see compute_answer_state) so no generation path can forget it or let the
+    # three states blend. "grounded" is the default; the engine overwrites it per answer.
+    answer_state: AnswerState = "grounded"
     citations: list[Evidence] = Field(default_factory=list)
     trace: Trace
     # --- new fields (Sections 8, 10) ---
@@ -203,6 +215,53 @@ class AskResponse(BaseModel):
     contradictions: list[dict[str, Any]] = Field(default_factory=list)
     multi_agent_trace: Optional[dict[str, Any]] = None
     agent_trace: Optional[dict[str, Any]] = None
+
+
+# Markers a reasoned (non-grounded) answer carries. Kept in sync with the disclaimers
+# emitted by the orchestrator (_GK_DISCLAIMER) and generate.py (ADVICE_GUIDANCE_DISCLAIMER)
+# so classification is robust to which path produced the answer.
+_REASONED_MARKERS = (
+    "not found in your uploaded sources",
+    "from the model's general",
+    "general guidance from model knowledge",
+    "not grounded",
+    "[ungrounded model knowledge]",
+)
+
+
+def compute_answer_state(
+    answer: str,
+    route: Optional["RouteDecision"],
+    evidence: list["Evidence"],
+    insufficient: bool,
+) -> AnswerState:
+    """Classify an answer into the tri-state grounding wall — the single source of truth
+    for the label the UI renders. Priority order matters:
+
+    1. ``insufficient`` → the honest decline, regardless of anything else.
+    2. ``reasoned`` → the answer is (partly or wholly) model/general knowledge, not the
+       user's sources: a GENERAL_KNOWLEDGE route, synthetic parametric evidence, or a
+       disclaimer marker present in the answer text.
+    3. ``grounded`` → everything else: the answer traces to retrieved evidence.
+    """
+    if insufficient:
+        return "insufficient"
+    # Real, non-parametric retrieved evidence means the answer is grounded — even if the
+    # router (wrongly) said GENERAL_KNOWLEDGE and the safety net recovered documents. Real
+    # grounding always beats a stale route label; that is the whole point of the safety net.
+    if any((e.extra or {}).get("type") == "parametric" for e in evidence):
+        return "reasoned"
+    low = (answer or "").lower()
+    if any(marker in low for marker in _REASONED_MARKERS):
+        return "reasoned"
+    has_grounded_evidence = any((e.extra or {}).get("type") != "parametric" for e in evidence)
+    if has_grounded_evidence:
+        return "grounded"
+    # No grounded evidence and not an honest decline → a pure model-knowledge answer.
+    route_name = route.route if route else None
+    if route_name == "GENERAL_KNOWLEDGE":
+        return "reasoned"
+    return "grounded"
 
 
 class ExampleQuestion(BaseModel):
