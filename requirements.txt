@@ -12,6 +12,7 @@ rank-bm25>=0.2.2
 sqlglot>=23.0
 numpy>=1.26
 python-dotenv>=1.0
+cryptography>=42.0   # secrets-at-rest encryption (Fernet) for stored OAuth/provider tokens
 
 # Agentic chat — LangGraph iterative agent (import-guarded; the classic pipeline
 # runs without these, so they're effectively optional for the offline path).

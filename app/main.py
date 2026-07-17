@@ -78,6 +78,10 @@ def _warm() -> None:
         eng.document_source.index.embedder.backend,
     )
 
+    # Flip the readiness signal so /health reports "ready" and the UI drops its warming banner.
+    from app.readiness import mark_ready
+    mark_ready()
+
 
 @app.get("/")
 def root() -> dict:

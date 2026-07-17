@@ -34,6 +34,24 @@ def test_token_storage_roundtrip(tmpdb):
     assert hs.get_token("alice") is None
 
 
+def test_token_is_encrypted_at_rest(tmpdb):
+    """The plaintext token must never touch the DB column — only ciphertext at rest."""
+    hs.save_token("carol", "pat-na2-secret")
+    db = mig.get_session_db()
+    try:
+        row = db.execute(
+            "SELECT token FROM integration_tokens WHERE user_id = ? AND provider = ?",
+            ("carol", hs.PROVIDER),
+        ).fetchone()
+    finally:
+        db.close()
+    stored = row["token"]
+    assert stored != "pat-na2-secret"          # not plaintext
+    assert "pat-na2-secret" not in stored        # the secret does not appear at all
+    assert stored.startswith("enc:v1:")          # versioned encrypted format
+    assert hs.get_token("carol") == "pat-na2-secret"  # still usable via the public API
+
+
 def test_fetch_objects_paginates(monkeypatch):
     pages = [
         {"results": [{"id": "1", "properties": {"email": "a@b.com"}}],

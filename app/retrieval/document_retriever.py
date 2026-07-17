@@ -218,6 +218,7 @@ class DocumentIndex:
             evidence.append(Evidence(
                 id=f"doc::{cid}", source_name="contracts_pdf", source_kind="documents",
                 content=c["text"], citation_label=label, score=_round(score_of(cid)),
+                parse_confidence=c.get("parse_confidence"), parser=c.get("parser"),
                 language=c.get("language"), document=c["document"], page=c.get("page"),
                 chunk_id=cid, section=c.get("section"),
             ))

@@ -30,19 +30,19 @@ function UploadCard({
         <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500 ring-1 ring-indigo-100">
           {icon}
         </div>
-        <div className="text-[13px] font-semibold text-slate-700">{title}</div>
-        <div className="mt-0.5 text-[11.5px] text-slate-400">{hint}</div>
+        <div className="text-[13px] font-semibold text-fg">{title}</div>
+        <div className="mt-0.5 text-[11.5px] text-faint">{hint}</div>
         <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden"
           onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
       </div>
       {busy && <div className="progress-track progress-indeterminate mt-2 h-1.5 w-full" />}
       {!busy && lastError && (
-        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-rose-600">
+        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-rose-600 dark:text-rose-400">
           <Icons.alert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{lastError}
         </p>
       )}
       {!busy && !lastError && lastMessage && (
-        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-emerald-600">
+        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-emerald-600 dark:text-emerald-400">
           <Icons.check className="mt-0.5 h-3.5 w-3.5 shrink-0" />{lastMessage}
         </p>
       )}
@@ -56,11 +56,35 @@ function timing(ms: number, origin: string) {
   return `indexed in ${Math.round(ms)} ms`;
 }
 
+// Parse-confidence badge (Phase 1 / Docling): how cleanly the PDF was parsed. A scanned or
+// complex-layout upload that parsed poorly is flagged here — the tri-state grounding label
+// is unaffected (this is a source-quality signal, not a trust-of-answer signal).
+function ParseConfidencePill({
+  value, parser,
+}: {
+  value?: number | null;
+  parser?: string | null;
+}) {
+  if (value == null) return null;
+  const pct = Math.round(value * 100);
+  const tone = value >= 0.8 ? "emerald" : value >= 0.55 ? "amber" : "rose";
+  const label = parser === "docling" ? "Docling" : "parse";
+  const title =
+    value < 0.55
+      ? "Low parse confidence — scanned or complex layout; answers cite it with a verify-the-original caveat."
+      : "How cleanly this document was parsed.";
+  return (
+    <Pill tone={tone} className="cursor-help" >
+      <span title={title}>{label} {pct}%</span>
+    </Pill>
+  );
+}
+
 function DocRow({ d }: { d: Inventory["documents"][number] }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-line bg-surface p-3">
       <div className="flex items-start justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-slate-700">
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-fg">
           <Icons.doc className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
           <span className="truncate" title={d.name}>{d.name}</span>
         </span>
@@ -75,11 +99,12 @@ function DocRow({ d }: { d: Inventory["documents"][number] }) {
             <Pill>{d.chunks_indexed} chunks</Pill>
             {d.pages ? <Pill>{d.pages} pages</Pill> : null}
             {d.languages.map((l) => <Pill key={l}>{LANG_LABEL[l] ?? l}</Pill>)}
+            <ParseConfidencePill value={d.parse_confidence} parser={d.parser} />
           </>
         )}
-        <span className="ml-auto text-[10.5px] text-slate-400">{timing(d.ingestion_ms, d.origin)}</span>
+        <span className="ml-auto text-[10.5px] text-faint">{timing(d.ingestion_ms, d.origin)}</span>
       </div>
-      {d.error && <p className="mt-1 text-[11px] text-rose-600">{d.error}</p>}
+      {d.error && <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{d.error}</p>}
     </div>
   );
 }
@@ -87,9 +112,9 @@ function DocRow({ d }: { d: Inventory["documents"][number] }) {
 function DbRow({ d }: { d: Inventory["databases"][number] }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-line bg-surface p-3">
       <div className="flex items-start justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-slate-700">
+        <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-fg">
           <Icons.db className="h-3.5 w-3.5 shrink-0 text-sky-500" />
           <span className="truncate" title={d.name}>{d.name}</span>
         </span>
@@ -105,9 +130,9 @@ function DbRow({ d }: { d: Inventory["databases"][number] }) {
             <Pill>{d.total_rows} rows</Pill>
           </>
         )}
-        <span className="ml-auto text-[10.5px] text-slate-400">{timing(d.ingestion_ms, d.origin)}</span>
+        <span className="ml-auto text-[10.5px] text-faint">{timing(d.ingestion_ms, d.origin)}</span>
       </div>
-      {d.error && <p className="mt-1 text-[11px] text-rose-600">{d.error}</p>}
+      {d.error && <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{d.error}</p>}
       {d.tables.length > 0 && (
         <>
           <button onClick={() => setOpen((o) => !o)}
@@ -118,15 +143,15 @@ function DbRow({ d }: { d: Inventory["databases"][number] }) {
           {open && (
             <div className="mt-2 space-y-1.5">
               {d.tables.map((t) => (
-                <div key={t.name} className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-1.5">
+                <div key={t.name} className="rounded-lg border border-line bg-surface-2/60 px-2.5 py-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-slate-700">
-                      <Icons.table className="h-3 w-3 text-slate-400" />{t.name}
+                    <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-fg">
+                      <Icons.table className="h-3 w-3 text-faint" />{t.name}
                     </span>
-                    <span className="font-mono text-[10.5px] text-slate-400">{t.rows} rows</span>
+                    <span className="font-mono text-[10.5px] text-faint">{t.rows} rows</span>
                   </div>
                   {t.columns.length > 0 && (
-                    <p className="mt-1 font-mono text-[10.5px] leading-relaxed text-slate-500">
+                    <p className="mt-1 font-mono text-[10.5px] leading-relaxed text-muted">
                       {t.columns.join(", ")}
                     </p>
                   )}
@@ -167,8 +192,8 @@ export default function Workspace({
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
-        <h2 className="text-[18px] font-bold text-slate-900">Workspace sources</h2>
-        <p className="mt-0.5 text-[13px] text-slate-500">
+        <h2 className="text-[18px] font-bold text-fg">Workspace sources</h2>
+        <p className="mt-0.5 text-[13px] text-muted">
           Upload PDFs and SQLite databases here. Then head to <span className="font-medium text-indigo-600">Chat</span> to
           ask questions grounded in your sources.
         </p>
@@ -176,7 +201,7 @@ export default function Workspace({
 
       <Card className="p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-muted">
             <Icons.upload className="h-3.5 w-3.5 text-indigo-500" /> Add sources
           </h3>
           {hasUploads && (
@@ -200,10 +225,10 @@ export default function Workspace({
 
       <Card className="p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+          <h3 className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-muted">
             <Icons.layers className="h-3.5 w-3.5 text-indigo-500" /> Your workspace
           </h3>
-          {hasUploads && <span className="text-[11px] text-slate-400">{uploadedChunks} chunks · {uploadedTables} tables</span>}
+          {hasUploads && <span className="text-[11px] text-faint">{uploadedChunks} chunks · {uploadedTables} tables</span>}
         </div>
         {hasUploads ? (
           <div className="space-y-2">
@@ -211,7 +236,7 @@ export default function Workspace({
             {uploadedDbs.map((d) => <DbRow key={d.name} d={d} />)}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-3 py-5 text-center text-[12px] leading-relaxed text-slate-400">
+          <div className="rounded-xl border border-dashed border-line bg-surface-2/50 px-3 py-5 text-center text-[12px] leading-relaxed text-faint">
             Your workspace is empty. Upload a PDF or SQLite database above to ask questions about your own data —
             answers come only from what you add here.
           </div>

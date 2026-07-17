@@ -86,6 +86,35 @@ def main() -> int:
     print(f"{'PDF':>7} {'GK→doc':>7}  {'✓' if grounded else '✗':>2}  "
           f"{len(gresp.trace.evidence):>3}  {'grnd':>5}  {('[grounding-first] ' + gprobe)[:64]}")
 
+    # Phase 1 (Docling) — robust ingestion regression. Uploads a table-heavy PDF and a
+    # multi-column PDF (basic parser, offline) and asserts the distinctive fact that lives
+    # in a TABLE CELL / a two-column flow is still retrieved + citable. Skipped when the
+    # hard eval corpus hasn't been generated (scripts/make_hard_pdfs.py).
+    from pathlib import Path as _Path
+    eval_dir = eng.settings.data_path / "eval_pdfs"
+    hard_cases = [
+        ("HARD_fees_table.pdf", "What is the early termination penalty?", "27%"),
+        ("HARD_multicolumn.pdf", "What is the cure period for a material breach?", "42"),
+    ]
+    for fname, q, needle in hard_cases:
+        fpath = eval_dir / fname
+        if not fpath.exists():
+            continue
+        from app.engine import Engine as _Engine
+        probe_eng = _Engine(user_id=f"eval-hard-{fname}")
+        info = probe_eng.add_pdf(fname, fpath)
+        # Scope to the workspace (the uploaded doc only) — the realistic client flow, and it
+        # isolates the hard PDF from the seed corpus under weak offline hashing embeddings.
+        hresp = probe_eng.ask(q, scope="workspace")
+        text = " ".join(e.content for e in hresp.trace.evidence)
+        ok = (info.status == "indexed" and needle in text
+              and not hresp.insufficient and hresp.answer_state == "grounded")
+        passed += ok
+        total += 1
+        print(f"{'PDF':>7} {'hard':>7}  {'✓' if ok else '✗':>2}  "
+              f"{len(hresp.trace.evidence):>3}  {('conf%.0f%%' % ((info.parse_confidence or 0)*100)):>5}  "
+              f"{(fname + ': ' + q)[:64]}")
+
     print("-" * 100)
     print(f"{passed}/{total} passed\n")
     return 0 if passed == total else 1

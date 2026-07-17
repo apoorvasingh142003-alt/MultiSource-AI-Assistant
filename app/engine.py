@@ -146,6 +146,8 @@ class Engine:
                     chunks_indexed=added, languages=langs,
                     pages=max((c.page for c in doc.chunks), default=0),
                     ingestion_ms=round((time.perf_counter() - t0) * 1000, 1),
+                    parse_confidence=getattr(doc, "parse_confidence", None),
+                    parser=getattr(doc, "parser", None),
                 )
             except Exception as exc:  # never let a bad upload take down the engine
                 info = IngestedDocumentInfo(
@@ -375,6 +377,8 @@ def _doc_info_from_ingested(doc, origin: str) -> IngestedDocumentInfo:
         name=doc.document, origin=origin, status="indexed",
         chunks_indexed=len(doc.chunks), languages=langs,
         pages=max((c.page for c in doc.chunks), default=0),
+        parse_confidence=getattr(doc, "parse_confidence", None),
+        parser=getattr(doc, "parser", None),
     )
 
 

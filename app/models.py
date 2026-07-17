@@ -31,6 +31,8 @@ class Evidence(BaseModel):
     content: str                              # exact text/row handed to the LLM
     citation_label: str                       # "[ACME_MSA_2025.pdf p.4]" / "[invoices #1187]"
     score: Optional[float] = None             # retrieval / rerank score (documents)
+    parse_confidence: Optional[float] = None  # 0..1 quality of the PDF parse this came from
+    parser: Optional[str] = None              # "basic" | "docling" — how the doc was parsed
     language: Optional[str] = None            # "en" | "de"
     origin: Optional[str] = None              # "sample" | "uploaded" — provenance for trust
     contribution_percentage: Optional[float] = None  # fraction of answer this evidence contributed
@@ -305,6 +307,10 @@ class IngestedDocumentInfo(BaseModel):
     pages: Optional[int] = None
     ingestion_ms: float = 0.0
     error: Optional[str] = None
+    # Phase 1 (Docling): document-level parse confidence (0..1) + which parser produced it,
+    # so the Workspace can flag a scanned/complex upload that parsed poorly.
+    parse_confidence: Optional[float] = None
+    parser: Optional[str] = None
 
 
 class IngestedDatabaseInfo(BaseModel):

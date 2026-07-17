@@ -93,6 +93,14 @@ def attach_trust_factors(
 
         # documents — pull the full rank breakdown from the matching candidate
         cand = cand_by_chunk.get(e.chunk_id)
+        # Parse quality of the source PDF (Phase 1 / Docling): a low-confidence parse
+        # (scan / complex layout) is surfaced here so a poorly-extracted passage never
+        # reads as a fully confident citation.
+        pconf = e.parse_confidence
+        parse_note = ""
+        if pconf is not None and pconf < 0.55:
+            parse_note = (f" Low parse confidence ({pconf:.0%}) — this passage came from a "
+                          f"scanned or complex-layout document; verify against the original.")
         if cand is not None:
             retrieval_score = cand.rrf_score if cand.rrf_score is not None else e.score
             rerank = cand.rerank_score
@@ -109,16 +117,18 @@ def attach_trust_factors(
                 "recency_score": 1.0 if e.origin == "uploaded" else 0.8,
                 "retrieval_score": retrieval_score,
                 "rerank_score": rerank,
+                "parse_confidence": pconf,
                 "is_primary_source": True,
-                "trust_summary": summary,
+                "trust_summary": summary + parse_note,
             }
         else:
             e.trust_factors = {
                 "recency_score": 0.8,
                 "retrieval_score": e.score,
                 "rerank_score": None,
+                "parse_confidence": pconf,
                 "is_primary_source": True,
-                "trust_summary": "Retrieved document passage.",
+                "trust_summary": "Retrieved document passage." + parse_note,
             }
 
 

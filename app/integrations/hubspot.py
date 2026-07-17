@@ -5,8 +5,8 @@ and pull contacts / companies / deals into their ISOLATED engine as SQLite table
 the same materialisation path as Google Sheets). Questions then route over that CRM data
 with grounding + citations, private to each tenant.
 
-Outbound HTTP uses the stdlib. The token is stored server-side in the local state DB; note
-for hardening: encrypt this column at rest before any shared/cloud deployment.
+Outbound HTTP uses the stdlib. The token is stored server-side in the local state DB,
+encrypted at rest via app/crypto.py (Fernet) — the column never holds a plaintext token.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import logging
 import urllib.parse
 import urllib.request
 
+from app.crypto import decrypt, encrypt
 from app.db.migrations import get_session_db
 from app.integrations.google_sheets import build_sqlite
 
@@ -42,11 +43,12 @@ class HubSpotError(Exception):
 def save_token(user_id: str, token: str) -> None:
     db = get_session_db()
     try:
+        # Encrypted at rest (see app/crypto.py) — the column never holds a plaintext token.
         db.execute(
             "INSERT INTO integration_tokens (user_id, provider, token) VALUES (?, ?, ?) "
             "ON CONFLICT(user_id, provider) DO UPDATE SET token = excluded.token, "
             "created_at = datetime('now')",
-            (user_id, PROVIDER, token),
+            (user_id, PROVIDER, encrypt(token)),
         )
         db.commit()
     finally:
@@ -60,7 +62,8 @@ def get_token(user_id: str) -> str | None:
             "SELECT token FROM integration_tokens WHERE user_id = ? AND provider = ?",
             (user_id, PROVIDER),
         ).fetchone()
-        return row["token"] if row else None
+        # decrypt() is backward-compatible with any legacy plaintext rows.
+        return decrypt(row["token"]) if row else None
     finally:
         db.close()
 
