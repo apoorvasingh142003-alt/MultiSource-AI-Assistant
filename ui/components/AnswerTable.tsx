@@ -78,9 +78,9 @@ export default function AnswerTable({ table }: { table: ParsedTable }) {
     /date|time|period|year|month|when/i.test(headers[0]);
 
   return (
-    <div className="my-3 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="my-3 rounded-xl border border-line bg-surface shadow-sm overflow-hidden">
       {/* Controls */}
-      <div className="flex items-center justify-end gap-2 border-b border-slate-100 px-3 py-2">
+      <div className="flex items-center justify-end gap-2 border-b border-line px-3 py-2">
         <Button variant="ghost" size="sm" onClick={exportCSV}>
           <Icons.doc className="h-3.5 w-3.5" />Export CSV
         </Button>
@@ -94,12 +94,12 @@ export default function AnswerTable({ table }: { table: ParsedTable }) {
       <div className="scroll-thin overflow-x-auto">
         <table className="w-full text-left text-[12.5px]">
           <thead>
-            <tr className="bg-indigo-50/60">
+            <tr className="bg-indigo-50/60 dark:bg-indigo-500/10">
               {headers.map((h, i) => (
                 <th
                   key={i}
                   onClick={() => toggleSort(i)}
-                  className="cursor-pointer select-none whitespace-nowrap px-3 py-2.5 font-semibold text-slate-700 transition hover:bg-indigo-100/50"
+                  className="cursor-pointer select-none whitespace-nowrap px-3 py-2.5 font-semibold text-fg transition hover:bg-indigo-100/50"
                 >
                   <span className="inline-flex items-center gap-1">
                     {h}
@@ -119,18 +119,18 @@ export default function AnswerTable({ table }: { table: ParsedTable }) {
               <tr
                 key={ri}
                 className={cn(
-                  "border-t border-slate-100 transition hover:bg-slate-50",
-                  ri % 2 === 1 && "bg-slate-50/40"
+                  "border-t border-line transition hover:bg-surface-2",
+                  ri % 2 === 1 && "bg-surface-2/40"
                 )}
               >
                 {row.map((cell, ci) => (
                   <td
                     key={ci}
                     className={cn(
-                      "px-3 py-2 text-slate-600",
+                      "px-3 py-2 text-body",
                       isTimeline &&
                         ci === 0 &&
-                        "border-l-[3px] border-l-indigo-400 font-semibold text-slate-800"
+                        "border-l-[3px] border-l-indigo-400 font-semibold text-fg"
                     )}
                   >
                     {cell}
@@ -144,8 +144,8 @@ export default function AnswerTable({ table }: { table: ParsedTable }) {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-slate-100 px-3 py-2">
-          <span className="text-[11px] text-slate-400">
+        <div className="flex items-center justify-between border-t border-line px-3 py-2">
+          <span className="text-[11px] text-faint">
             Page {page + 1} of {totalPages} · {rows.length} rows
           </span>
           <div className="flex items-center gap-1">

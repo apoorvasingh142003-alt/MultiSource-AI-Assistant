@@ -150,8 +150,16 @@ OpenAI, Groq, Gemini compat, Ollama).
 - `app/channels/` (telegram, whatsapp) and `app/integrations/` (google_sheets, hubspot) are
   per-tenant; inbound channel messages map to a tenant and run its isolated engine.
 - `ui/` is Next.js (App Router). It proxies `/api/*` to the backend (`API_PROXY_TARGET`).
-  The inspector components (`Inspector.tsx`, `trace.tsx`, `ExplainabilityPanel.tsx`,
-  `MultiAgentTrace.tsx`, `AnswerPanel.tsx`) render the `Trace`.
+  **Phase-2 shell (ChatGPT-class):** `app/page.tsx` is a clean chat surface — `ChatSidebar`
+  (threads) · centered `ChatThread` (slim messages: answer + clickable `[eN]` citations + a
+  compact tri-state `AnswerStateChip` + source chips + Inspect/Copy/Regenerate) · `Composer`
+  (📎 in-chat PDF upload → `/ingest/pdf`, plus a `CustomizePanel` popover for free-text role +
+  instructions — the replacement for the removed 13-persona picker). The heavy trace/evidence
+  lives in `InspectorPanel.tsx`, a right slide-in drawer with tabs **Answer · Trace · Evidence ·
+  Sources** that reuses the rich renderers verbatim (`AnswerPanel.tsx`, `Inspector.tsx`,
+  `trace.tsx`, `Workspace` rows). Streaming still uses the custom SSE transport in `lib/api.ts`
+  (`askStream`); the final `done` event carries the full `Trace`. There are no top-nav tabs and
+  no assistant-ui/Vercel-AI-SDK dependency (deliberate — see the Phase-2 plan).
 
 ## UI styling convention
 

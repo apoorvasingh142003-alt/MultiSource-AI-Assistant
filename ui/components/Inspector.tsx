@@ -34,18 +34,18 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
       {t.route && (
         <Collapsible icon={<Icons.route />} title={<>Routing decision <RouteBadge route={t.route.route} small /></>}
           right={<Pill tone="indigo">{(t.route.confidence * 100).toFixed(0)}% confidence</Pill>}>
-          <div className="space-y-2 text-[12.5px] text-slate-600">
+          <div className="space-y-2 text-[12.5px] text-body">
             <p>{t.route.reasoning}</p>
             {t.route.route === "NONE" && (
-              <p className="text-slate-500">No matching evidence found in uploaded sources.</p>
+              <p className="text-muted">No matching evidence found in uploaded sources.</p>
             )}
             <div className="flex flex-wrap gap-2">
               {t.route.agentic && <Pill tone="indigo"><Icons.bolt className="h-3 w-3" />agentic: SQL → entities → documents</Pill>}
               <Pill>languages: {t.route.languages.join(", ")}</Pill>
               {t.route.strategy_note && <Pill>{t.route.strategy_note}</Pill>}
             </div>
-            {t.route.sql_subquery && <p className="text-slate-500"><span className="text-slate-400">sql sub-query:</span> {t.route.sql_subquery}</p>}
-            {t.route.document_subquery && <p className="text-slate-500"><span className="text-slate-400">document sub-query:</span> {t.route.document_subquery}</p>}
+            {t.route.sql_subquery && <p className="text-muted"><span className="text-faint">sql sub-query:</span> {t.route.sql_subquery}</p>}
+            {t.route.document_subquery && <p className="text-muted"><span className="text-faint">document sub-query:</span> {t.route.document_subquery}</p>}
           </div>
         </Collapsible>
       )}
@@ -54,8 +54,8 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
         <Collapsible icon={<Icons.layers />} title="Orchestrator trace" right={<Pill>{t.notes.length} steps</Pill>}>
           <ol className="space-y-2">
             {t.notes.map((n, i) => (
-              <li key={i} className="flex gap-2.5 text-[12.5px] text-slate-600">
-                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-50 font-mono text-[9px] text-indigo-600 ring-1 ring-indigo-200">{i + 1}</span>
+              <li key={i} className="flex gap-2.5 text-[12.5px] text-body">
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-50 font-mono text-[9px] text-indigo-600 ring-1 ring-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30">{i + 1}</span>
                 <span>{n}</span>
               </li>
             ))}
@@ -73,7 +73,7 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
         <Collapsible icon={<Icons.search />} title="Document retrieval — dense + BM25 → RRF → rerank"
           right={<Pill tone="emerald">{t.document_retrieval.candidates.length} candidates</Pill>}>
           {t.document_retrieval.strategy && (
-            <p className="mb-2.5 text-[12.5px] leading-relaxed text-slate-600">
+            <p className="mb-2.5 text-[12.5px] leading-relaxed text-body">
               {t.document_retrieval.strategy}
             </p>
           )}
@@ -101,8 +101,8 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
 
       {t.evidence.length > 0 && (
         <Collapsible icon={<Icons.layers />} title="Evidence (single source of truth)" right={<Pill>{t.evidence.length} items</Pill>}>
-          <p className="mb-2.5 text-[11.5px] text-slate-400">
-            Everything retrieved for this answer. Items marked <span className="font-medium text-emerald-600">used in answer</span> are
+          <p className="mb-2.5 text-[11.5px] text-faint">
+            Everything retrieved for this answer. Items marked <span className="font-medium text-emerald-600 dark:text-emerald-400">used in answer</span> are
             what the response is actually grounded in.
           </p>
           <div className="space-y-2">{t.evidence.map((e) => <EvidenceItem key={e.id} e={e} highlight={highlight === e.id} showUsed />)}</div>
@@ -115,9 +115,9 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
             <SectionTitle>Cost &amp; tokens</SectionTitle>
             {t.cost && (
               <div className="space-y-1 text-[12px]">
-                <div className="flex items-center gap-1.5 font-mono text-slate-800"><Icons.coin className="h-3.5 w-3.5 text-amber-500" />${t.cost.total_usd.toFixed(4)}</div>
-                <div className="text-slate-500">{t.cost.input_tokens} in / {t.cost.output_tokens} out · {t.cost.live_calls} live</div>
-                <div className="text-[11px] text-slate-400">{t.cost.note}</div>
+                <div className="flex items-center gap-1.5 font-mono text-fg"><Icons.coin className="h-3.5 w-3.5 text-amber-500" />${t.cost.total_usd.toFixed(4)}</div>
+                <div className="text-muted">{t.cost.input_tokens} in / {t.cost.output_tokens} out · {t.cost.live_calls} live</div>
+                <div className="text-[11px] text-faint">{t.cost.note}</div>
               </div>
             )}
           </div>
@@ -125,7 +125,7 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
             <SectionTitle>Timings</SectionTitle>
             <div className="space-y-1 text-[12px]">
               {t.timings.map((ti) => (
-                <div key={ti.name} className="flex justify-between font-mono text-slate-500">
+                <div key={ti.name} className="flex justify-between font-mono text-muted">
                   <span>{ti.name}</span><span>{ti.duration_ms} ms</span>
                 </div>
               ))}
@@ -138,13 +138,13 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
                 <Pill tone={t.citation_check.verified ? "emerald" : "rose"}>
                   {t.citation_check.verified ? <><Icons.check className="h-3 w-3" />verified</> : "failed"}
                 </Pill>
-                <p className="mt-1.5 text-[11px] text-slate-500">{t.citation_check.note}</p>
+                <p className="mt-1.5 text-[11px] text-muted">{t.citation_check.note}</p>
               </div>
             )}
           </div>
         </div>
         {t.llm_calls.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-3">
             {t.llm_calls.map((c, i) => (
               <Pill key={i} tone={c.mode === "live" ? "emerald" : "slate"}>{c.purpose}: {c.model} ({c.mode})</Pill>
             ))}
