@@ -33,10 +33,12 @@ from app.agent.tools import AgentRunContext
 from app.config import get_settings
 from app.generation.analysis import (attach_trust_factors, compute_contributions,
                                      compute_hallucination_risk, detect_contradictions)
-from app.generation.generate import generate_answer, generate_answer_stream
+from app.generation.generate import (generate_answer, generate_answer_stream,
+                                     generate_grounded_advice)
 from app.generation.verify import verify_citations
 from app.models import (AskResponse, GenerationStep, StageTiming, Trace)
 from app.pricing import summarize
+from app.retrieval.intent import detect_reasoning_mode
 from app.routing.classify import classify
 
 log = logging.getLogger("aba.research")
@@ -190,12 +192,26 @@ def run_deep_research(orch, question: str,
         return resp
 
     # ---- final grounded answer over EVERYTHING collected --------------------------
-    if on_token:
+    # Reasoning mode (Phase 5): a design/advice question over the researched evidence
+    # gets the same two-part treatment as the classic path (cited Part 1 + labelled
+    # guidance → reasoned); an analysis question gets the document-intelligence
+    # directive (stays grounded). Plain factual questions are unchanged.
+    reasoning_mode = detect_reasoning_mode(question)
+    if reasoning_mode in ("advice", "design"):
+        answer, cited, insufficient, gen_call = generate_grounded_advice(
+            question, ctx.evidence, role=role, output_mode=output_mode,
+            custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+            output_format=output_format, temperature=temperature,
+            conversation_history=conversation_history,
+            mode=reasoning_mode, on_token=on_token,
+        )
+    elif on_token:
         answer, cited, insufficient, gen_call = generate_answer_stream(
             question, ctx.evidence, on_token=on_token, role=role, output_mode=output_mode,
             custom_system_prompt=custom_system_prompt, agent_role=agent_role,
             output_format=output_format, temperature=temperature,
             conversation_history=conversation_history,
+            reasoning_mode=reasoning_mode or None,
         )
     else:
         answer, cited, insufficient, gen_call = generate_answer(
@@ -203,6 +219,7 @@ def run_deep_research(orch, question: str,
             custom_system_prompt=custom_system_prompt, agent_role=agent_role,
             output_format=output_format, temperature=temperature,
             conversation_history=conversation_history,
+            reasoning_mode=reasoning_mode or None,
         )
     if gen_call:
         ctx.calls.append(gen_call)
@@ -210,6 +227,7 @@ def run_deep_research(orch, question: str,
     return _build_response(
         question, answer, ctx, decision, research_trace, rounds,
         role, output_mode, t0, declared_cited=cited, insufficient=insufficient,
+        reasoning_mode=reasoning_mode or None,
     )
 
 
@@ -289,12 +307,13 @@ def _run_sql(ctx: AgentRunContext, query: str, round_no: int, _emit) -> Optional
 
 def _build_response(question, answer, ctx: AgentRunContext, decision, research_trace,
                     rounds, role, output_mode, t0, declared_cited=None,
-                    insufficient=False) -> AskResponse:
+                    insufficient=False, reasoning_mode=None) -> AskResponse:
     """Rebuild the standard ``Trace`` (same shape as the classic orchestrator + agent
     runner) and run the identical verification/explainability chokepoints."""
     trace = Trace(question=question)
     trace.role = role
     trace.output_mode = output_mode
+    trace.reasoning_mode = reasoning_mode
     trace.route = decision
     trace.languages = decision.languages
     trace.notes.append(

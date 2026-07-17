@@ -145,6 +145,53 @@ def main() -> int:
           f"{len(wresp.trace.evidence):>3}  {'wall':>5}  "
           f"{('[deep research] ' + wq)[:64]}")
 
+    # Phase 5 (reasoning/design mode) — the exit criterion: a design/strategy question
+    # produces a structured, clearly-LABELLED answer grounded in the actual contracts:
+    # Part 1 cites retrieved evidence (verified), Part 2 carries the exact guidance
+    # disclaimer, and the whole answer lands on the REASONED side of the wall. An
+    # analysis question (document intelligence) stays GROUNDED. An advice question with
+    # no relevant corpus stays disclaimed — never fabricated, never a bare decline.
+    from app.generation.generate import ADVICE_GUIDANCE_DISCLAIMER
+
+    q5 = "Design a renewal strategy for our customer contracts."
+    r5 = eng.ask(q5)
+    design_ok = (
+        r5.answer_state == "reasoned" and not r5.insufficient
+        and r5.trace.reasoning_mode == "design"
+        and len(r5.trace.evidence) > 0
+        and ADVICE_GUIDANCE_DISCLAIMER in r5.answer
+        and bool(r5.trace.citation_check and r5.trace.citation_check.verified
+                 and r5.trace.citation_check.cited_ids)
+    )
+    passed += design_ok
+    total += 1
+    print(f"{'PDF':>7} {'design':>7}  {'✓' if design_ok else '✗':>2}  "
+          f"{len(r5.trace.evidence):>3}  {'rsnd':>5}  {('[design mode] ' + q5)[:64]}")
+
+    q6 = "Analyze the termination clauses in our contracts."
+    r6 = eng.ask(q6)
+    analysis_ok = (
+        r6.answer_state == "grounded" and not r6.insufficient
+        and r6.trace.reasoning_mode == "analysis"
+        and len(r6.trace.evidence) > 0
+        and bool(r6.trace.citation_check and r6.trace.citation_check.verified)
+    )
+    passed += analysis_ok
+    total += 1
+    print(f"{'PDF':>7} {'analyz':>7}  {'✓' if analysis_ok else '✗':>2}  "
+          f"{len(r6.trace.evidence):>3}  {'grnd':>5}  {('[analysis mode] ' + q6)[:64]}")
+
+    q7 = "Would you recommend we expand the Berlin office?"
+    r7 = eng.ask(q7)
+    advice_ok = (
+        r7.answer_state == "reasoned" and not r7.insufficient
+        and ADVICE_GUIDANCE_DISCLAIMER in r7.answer
+    )
+    passed += advice_ok
+    total += 1
+    print(f"{'—':>7} {'advice':>7}  {'✓' if advice_ok else '✗':>2}  "
+          f"{len(r7.trace.evidence):>3}  {'rsnd':>5}  {('[advice wall] ' + q7)[:64]}")
+
     print("-" * 100)
     print(f"{passed}/{total} passed\n")
     return 0 if passed == total else 1

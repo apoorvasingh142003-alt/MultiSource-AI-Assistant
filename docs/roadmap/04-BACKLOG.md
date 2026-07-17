@@ -108,10 +108,31 @@ on the Anthropic/offline deployments; the LangGraph path additionally got the sa
 
 ## Phase 5 — Reasoning / design mode
 
-- [ ] Strengthen `generate_grounded_advice` (`app/generation/generate.py`) for design/strategy Qs.
-- [ ] Document-intelligence prompts: clause analysis, gap analysis, risk ID over retrieved evidence.
-- [ ] Ensure advice answers always carry the reasoned-advice label + disclaimer; never fabricate facts.
-- [ ] Eval: advice questions produce structured, grounded, correctly-labeled output.
+See [plans/05-REASONING-plan.md](plans/05-REASONING-plan.md). **Design note:** one
+deterministic detector (`app/retrieval/intent.py::detect_reasoning_mode` → advice /
+design / analysis / plain), three wall-safe treatments — advice/design get the two-part
+grounded-facts + labelled-guidance answer (reasoned); analysis stays a grounded,
+cited document-intelligence answer.
+
+- [x] Strengthen `generate_grounded_advice` for design/strategy Qs — `mode="design"`
+      turns Part 2 into a structured deliverable (situation → options → recommendations
+      → risks → next steps); real streaming; extractive+structured deterministic
+      fallback so offline demos still ground Part 1 and cite it. **Crucially, the
+      advice path now also fires when retrieval FOUND evidence** (before, a design
+      question with retrieved contracts got the plain factual prompt), gated by the
+      deterministic `_on_topic` check so guidance is never grounded in off-topic text.
+- [x] Document-intelligence prompts — `analysis` reasoning mode appends a DOCUMENT
+      INTELLIGENCE directive (findings per document/clause, every finding cited,
+      absences stated as facts about the record only) to grounded generation; answer
+      stays `grounded`. Deep research honours the same modes for its final answer.
+- [x] Advice answers always carry the reasoned-advice label + disclaimer — the exact
+      `ADVICE_GUIDANCE_DISCLAIMER` sentence is enforced post-generation, and
+      `compute_answer_state` lands every advice/design answer on `reasoned`. Grouped
+      citation markers ("[e1, e2]") are normalized so a grounded Part 1 always passes
+      verification. `Trace.reasoning_mode` surfaces the mode in the inspector.
+- [x] Eval: `scripts/eval.py` Phase-5 block (design → reasoned + cited + verified +
+      disclaimed; analysis → grounded + verified; off-corpus advice → disclaimed, never
+      fabricated, never a bare decline) + `tests/test_reasoning_mode.py`.
 
 ## Phase 6 — Actions & integrations
 

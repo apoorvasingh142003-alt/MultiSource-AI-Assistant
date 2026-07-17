@@ -29,6 +29,14 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
       <Card className="flex flex-wrap items-center gap-2 px-4 py-3">
         <Pill tone="indigo">Output: {t.output_mode || "Standard Response"}</Pill>
         {t.role && <Pill>Role: {t.role}</Pill>}
+        {t.reasoning_mode && (
+          <Pill tone="amber">
+            reasoning mode: {t.reasoning_mode}
+            {t.reasoning_mode === "analysis"
+              ? " — grounded document intelligence"
+              : " — grounded facts + labelled guidance"}
+          </Pill>
+        )}
       </Card>
 
       {t.route && (

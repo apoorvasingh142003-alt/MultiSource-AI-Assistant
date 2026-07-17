@@ -163,6 +163,11 @@ class Trace(BaseModel):
     role: Optional[str] = None                                # assigned role (e.g., "doctor", "business_analyst")
     role_instructions: Optional[str] = None                   # role-specific system instructions used
     output_mode: str = "Standard Response"
+    # Reasoning mode (Phase 5): "advice" | "design" | "analysis" | None (plain factual).
+    # Deterministically detected from the question; decides whether generation runs the
+    # two-part grounded-facts + labelled-guidance treatment (advice/design → reasoned) or
+    # the document-intelligence directive (analysis → still grounded).
+    reasoning_mode: Optional[str] = None
     route: Optional[RouteDecision] = None
     notes: list[str] = Field(default_factory=list)            # orchestrator narration
     document_retrieval: Optional[DocumentRetrievalTrace] = None

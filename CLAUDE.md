@@ -138,6 +138,20 @@ concurrently, then synthesizes — exposing a `multi_agent_trace`.
   LangGraph graph also gained a **sufficiency node** (`graph.py`) that steers the agent
   back for one bounded extra round when its evidence looks insufficient.
 
+- **Reasoning / design mode (Phase 5)** (`app/retrieval/intent.py::detect_reasoning_mode`):
+  one deterministic detector classifies each question as `advice` | `design` | `analysis`
+  | plain. **advice/design** → the two-part treatment (`generate_grounded_advice`): PART 1
+  cites the retrieved on-topic evidence (gated by `_on_topic`, verified like any grounded
+  answer), PART 2 starts with the exact `ADVICE_GUIDANCE_DISCLAIMER` sentence — free-form
+  guidance for advice, a structured strategy deliverable for design — which lands the
+  answer on the **reasoned** side of the wall via `compute_answer_state`'s marker. This
+  path now fires *with or without* retrieved evidence (before Phase 5, only when retrieval
+  found nothing). **analysis** (clause/risk analysis) appends a DOCUMENT INTELLIGENCE
+  directive to grounded generation and stays **grounded**. Deep research honours the same
+  modes for its final answer; `Trace.reasoning_mode` renders as an amber pill in the
+  inspector. Grouped citation markers ("[e1, e2]") are normalized to "[e1][e2]" at the
+  generation chokepoint so verification/clickable citations never miss ids.
+
 ### Engine, tenancy, and state
 - `app/engine.py`: `Engine` wires sources + orchestrator. **One Engine per tenant** —
   `get_engine(user_id)` is an LRU cache of per-user engines. Startup ingests only the

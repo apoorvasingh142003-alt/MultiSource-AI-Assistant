@@ -224,6 +224,9 @@ export interface Trace {
   role?: string | null;
   role_instructions?: string | null;
   output_mode: string;
+  /** Phase 5 — "advice" | "design" (two-part reasoned treatment) | "analysis" (grounded
+   *  document intelligence) | null (plain factual Q&A). */
+  reasoning_mode?: string | null;
   route?: RouteDecision | null;
   notes: string[];
   document_retrieval?: DocumentRetrievalTrace | null;

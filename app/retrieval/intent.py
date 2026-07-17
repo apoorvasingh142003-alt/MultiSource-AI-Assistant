@@ -201,6 +201,59 @@ def is_advice_question(query: str) -> bool:
     return bool(_ADVICE_CUE.search(query or ""))
 
 
+# --- Reasoning / design mode (Phase 5) ----------------------------------------
+# Deterministic detection of the question's REASONING MODE — which of the two answer
+# treatments beyond plain factual Q&A it needs. Same offline floor as the rest of this
+# module; the cues are word-bounded so the factual demo suite never trips them
+# ("what penalties do they define", "summarize the risks" stay plain grounded Q&A).
+#
+#   "advice"   — recommendation / judgement ("would you recommend…") → two-part
+#                grounded-facts + labelled general guidance (reasoned).
+#   "design"   — design / strategy / planning deliverable ("design a renewal
+#                strategy…", "propose a plan…", gap analysis) → same two-part
+#                treatment with a structured-deliverable Part 2 (reasoned).
+#   "analysis" — document intelligence over the record (clause analysis, risk
+#                identification, assessment/audit/review) → grounded reasoning over
+#                the evidence only; stays a cited, grounded answer.
+_DESIGN_CUE = re.compile(
+    r"\b(design|draft|devise|formulate|propose|proposal|develop)\s+(?:\w+\s+){0,4}"
+    r"(strateg\w*|plan|plans|roadmap|playbook|framework|approach|policy|process|"
+    r"programme|program|solution|structure)\b"
+    r"|\b(renewal|negotiation|pricing|retention|mitigation|remediation)\s+strateg\w*\b"
+    r"|\bstrateg(?:y|ies)\s+for\b"
+    r"|\b(action\s+plan|roadmap\s+for|gap\s+analysis|what(?:'s|\s+is)\s+missing)\b"
+    r"|\bhow\s+(?:should|could|can)\s+we\b"
+    r"|\bbest\s+way\s+to\b"
+    r"|\b(improve|optimi[sz]e|strengthen|restructure|renegotiate)\b",
+    re.I,
+)
+_ANALYSIS_CUE = re.compile(
+    r"\b(analy[sz]e|analysis\s+of|assess|assessment|evaluate|evaluation|audit|"
+    r"critique|scrutini[sz]e)\b"
+    r"|\breview\s+(?:the|our|all|these|each|every)\b"
+    r"|\b(identify|flag|spot|highlight)\s+(?:\w+\s+){0,3}(risks?|issues?|"
+    r"obligations?|liabilit\w*|weakness\w*|red\s+flags?|inconsistenc\w*)\b"
+    r"|\brisk\s+(?:assessment|identification|profile)\b"
+    r"|\bclause\s+analysis\b",
+    re.I,
+)
+
+
+def detect_reasoning_mode(query: str) -> str:
+    """Classify the question's reasoning mode — "advice", "design", "analysis", or ""
+    (plain factual Q&A). Priority: advice > design > analysis, so a question that both
+    asks for a judgement and mentions analysis gets the safest (disclaimed) treatment,
+    and a design ask that includes analytic verbs still yields the full deliverable."""
+    q = query or ""
+    if _ADVICE_CUE.search(q):
+        return "advice"
+    if _DESIGN_CUE.search(q):
+        return "design"
+    if _ANALYSIS_CUE.search(q):
+        return "analysis"
+    return ""
+
+
 def text_hits(text: str, gate_terms: list[str]) -> bool:
     """True if the chunk text literally contains any gate term (case-insensitive)."""
     if not gate_terms:
