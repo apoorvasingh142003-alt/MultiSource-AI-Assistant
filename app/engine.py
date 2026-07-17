@@ -249,6 +249,7 @@ class Engine:
         session_id: Optional[str] = None,
         multi_agent: bool = False,
         agent_mode: bool = False,
+        deep_research: bool = False,
         temperature: Optional[float] = None,
         conversation_history: Optional[list[dict]] = None,
         on_token=None,
@@ -264,6 +265,22 @@ class Engine:
             if conversation_history is None and session_id:
                 from app.conversation import load_history
                 conversation_history = load_history(session_id)
+
+            # Deep research (Phase 4): bounded retrieve → sufficiency-check →
+            # reformulate loop. Provider-agnostic and offline-deterministic, so it
+            # takes precedence over agent mode when both are toggled.
+            if deep_research:
+                from app.agent.research import run_deep_research
+                resp = run_deep_research(
+                    self.orchestrator, question,
+                    allowed_docs=allowed_docs, allowed_tables=allowed_tables,
+                    role=role, output_mode=output_mode,
+                    custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                    output_format=output_format, temperature=temperature,
+                    conversation_history=conversation_history, on_token=on_token,
+                    on_event=on_event,
+                )
+                return self._finalize(resp)
 
             # Agent mode (Section: LangGraph iterative agent): the model loops over
             # tools (SQL / document retrieval), then we rebuild the standard Trace so

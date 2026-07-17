@@ -94,6 +94,7 @@ export interface AskOptions {
   output_format?: string;
   multi_agent?: boolean;
   agent_mode?: boolean;
+  deep_research?: boolean;
   temperature?: number | null;
   session_id?: string | null;
   conversation_history?: { role: string; content: string }[] | null;
@@ -110,6 +111,7 @@ function askBody(question: string, o: AskOptions): Record<string, unknown> {
     ...(o.output_format && o.output_format !== "auto" ? { output_format: o.output_format } : {}),
     ...(o.multi_agent ? { multi_agent: true } : {}),
     ...(o.agent_mode ? { agent_mode: true } : {}),
+    ...(o.deep_research ? { deep_research: true } : {}),
     ...(o.temperature != null ? { temperature: o.temperature } : {}),
     ...(o.session_id ? { session_id: o.session_id } : {}),
     ...(o.conversation_history ? { conversation_history: o.conversation_history } : {}),
@@ -129,11 +131,37 @@ export async function ask(question: string, opts: AskOptions = {}): Promise<AskR
 export interface AgentStep { iteration: number; tool: string; args: Record<string, unknown> }
 export interface AgentObservation { tool: string | null; summary: string }
 
+/** One live deep-research progress event (Phase 4). `kind` discriminates:
+ *  start · search (a retrieval action) · assess (a sufficiency verdict) ·
+ *  off_topic · done. Fields are populated per kind — see app/agent/research.py. */
+export interface ResearchStep {
+  kind: "start" | "search" | "assess" | "off_topic" | "done";
+  round?: number;
+  tool?: string;
+  query?: string;
+  documents?: string[];
+  found?: number;
+  added?: number;
+  total_evidence?: number;
+  sufficient?: boolean;
+  coverage?: number;
+  missing_terms?: string[];
+  missing_documents?: string[];
+  note?: string;
+  source?: string;
+  stop_reason?: string;
+  rounds?: number;
+  evidence?: number;
+  max_rounds?: number;
+  documents_in_scope?: number;
+}
+
 export interface StreamHandlers {
   onDelta?: (text: string) => void;
   onRoute?: (route: string | null) => void;
   onAgentStep?: (step: AgentStep) => void;
   onAgentObservation?: (obs: AgentObservation) => void;
+  onResearchStep?: (step: ResearchStep) => void;
   onDone: (resp: AskResponse) => void;
   onError?: (msg: string) => void;
 }
@@ -177,6 +205,7 @@ export async function askStream(
       else if (event === "route") handlers.onRoute?.(payload.route ?? null);
       else if (event === "agent_step") handlers.onAgentStep?.(payload as AgentStep);
       else if (event === "agent_observation") handlers.onAgentObservation?.(payload as AgentObservation);
+      else if (event === "research_step") handlers.onResearchStep?.(payload as ResearchStep);
       else if (event === "done") handlers.onDone(payload as AskResponse);
       else if (event === "error") handlers.onError?.(payload.message ?? "stream error");
     }
@@ -261,6 +290,7 @@ export async function regenerateMessage(
       ...(opts.output_format && opts.output_format !== "auto" ? { output_format: opts.output_format } : {}),
       ...(opts.multi_agent ? { multi_agent: true } : {}),
       ...(opts.agent_mode ? { agent_mode: true } : {}),
+      ...(opts.deep_research ? { deep_research: true } : {}),
       ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
     },
   );

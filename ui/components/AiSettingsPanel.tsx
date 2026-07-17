@@ -38,13 +38,14 @@ export interface AiSettingsState {
   output: string;       // merged output key (see OUTPUT_OPTIONS)
   multiAgent: boolean;
   agentMode: boolean;   // LangGraph iterative agent
+  deepResearch: boolean; // Phase 4: iterative retrieve → sufficiency check → reformulate
   temperature: number;  // 0..1, applied to final generation
 }
 
 const STORAGE_KEY = "nexus-settings";
 export const DEFAULT_SETTINGS: AiSettingsState = {
   agentRole: "", customSystemPrompt: "", output: "auto",
-  multiAgent: false, agentMode: false, temperature: 0,
+  multiAgent: false, agentMode: false, deepResearch: false, temperature: 0,
 };
 
 function loadSettings(): AiSettingsState {

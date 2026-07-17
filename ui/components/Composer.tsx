@@ -85,6 +85,21 @@ export default function Composer({
               />
             )}
           </div>
+
+          {/* deep research (Phase 4) — iterate retrieval until the evidence suffices */}
+          <button
+            onClick={() => onUpdateSettings({ deepResearch: !settings.deepResearch })}
+            title="Deep research: search iteratively until the evidence actually answers the question"
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium transition",
+              settings.deepResearch
+                ? "bg-accent-soft text-accent ring-1 ring-inset ring-accent/25"
+                : "text-muted hover:bg-surface-2 hover:text-fg",
+            )}
+          >
+            <Icons.search className="h-4 w-4" />
+            <span className="hidden sm:inline">Deep research</span>
+          </button>
         </div>
 
         {/* text */}
@@ -113,6 +128,7 @@ export default function Composer({
 
       {/* active-customization hint */}
       <div className="mt-1.5 flex items-center justify-center gap-2 px-2 text-[11px] text-faint">
+        {settings.deepResearch && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent ring-1 ring-inset ring-accent/25">Deep research</span>}
         {settings.agentMode && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent ring-1 ring-inset ring-accent/25">Agent mode</span>}
         {settings.multiAgent && <span className="rounded bg-accent-soft px-1.5 py-0.5 font-medium text-accent ring-1 ring-inset ring-accent/25">Multi-agent</span>}
         {settings.agentRole && <span className="max-w-[220px] truncate rounded bg-surface-2 px-1.5 py-0.5 font-medium text-muted ring-1 ring-inset ring-line">as {settings.agentRole}</span>}

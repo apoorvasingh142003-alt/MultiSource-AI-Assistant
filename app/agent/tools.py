@@ -29,12 +29,20 @@ class AgentRunContext:
         self.calls: list = []
         self.steps: list[dict] = []
         self._seen: dict[tuple, str] = {}
+        # sufficiency gate state (Phase 4): how many times the graph's sufficiency node
+        # has run, and whether it decided to steer the agent back for another round.
+        self.sufficiency_passes = 0
+        self.steer = False
 
     def add_evidence(self, ev_list: list[Evidence]) -> list[str]:
         """Append evidence (dedup by content) and return the assigned ids, in order."""
         ids: list[str] = []
         for e in ev_list:
-            key = (e.source_kind, e.source_name, e.content)
+            # Provenance is part of identity: contract PDFs share boilerplate clauses,
+            # and collapsing an identical clause ACROSS documents would silently lose a
+            # document's coverage (and its citation). Re-retrieving the same chunk of
+            # the same document still dedups.
+            key = (e.source_kind, e.source_name, e.document, e.page, e.content)
             if key in self._seen:
                 ids.append(self._seen[key])
                 continue

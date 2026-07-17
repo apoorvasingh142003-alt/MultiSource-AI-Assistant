@@ -104,6 +104,17 @@ class Settings(BaseSettings):
     # grounded route the rule layer found (PDF/SQL/HYBRID) — never the reverse.
     router_rule_override: bool = True
 
+    # --- Deep research (Phase 4: agentic iterative retrieval) ---------------
+    # Bounds for the retrieve → sufficiency-check → reformulate loop. The loop is
+    # observable (every round streams a research_step event) and hard-capped so a
+    # deep-research question can never turn into a silent long spinner.
+    research_max_rounds: int = 3            # total retrieval rounds (initial + follow-ups)
+    research_queries_per_round: int = 3     # follow-up searches executed per round
+    research_time_budget_seconds: float = 25.0
+    research_min_coverage: float = 0.6      # question-term coverage considered sufficient
+    research_spread_min_docs: int = 4       # "across all X" needs evidence from ≥ this many docs
+    research_max_evidence: int = 18         # stop expanding once this much evidence is held
+
     # --- SQL safety --------------------------------------------------------
     sql_row_limit: int = 200
     sql_timeout_seconds: int = 5

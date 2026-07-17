@@ -82,11 +82,29 @@ so the wall is never dressed up as a confident chart, and every path gets them f
 
 ## Phase 4 — Agentic iterative retrieval
 
-- [ ] Sufficiency-check node in the LangGraph agent (`app/agent/graph.py`): "does current
-      evidence answer the question?" → continue/stop.
-- [ ] Query reformulation / expansion loop; bounded rounds + latency cap.
-- [ ] Stream iteration steps into the trace panel (`app/agent/runner.py` → trace timeline).
-- [ ] Eval: multi-hop + evidence-spread-across-docs cases with ground-truth citations.
+See [plans/04-DEEP-RESEARCH-plan.md](plans/04-DEEP-RESEARCH-plan.md). **Design note:** the
+headline loop is a provider-agnostic controller (`app/agent/research.py`) — the LangGraph
+agent requires an OpenAI-compatible endpoint, so a LangGraph-only loop would be invisible
+on the Anthropic/offline deployments; the LangGraph path additionally got the same gate.
+
+- [x] Sufficiency check — `app/agent/sufficiency.py`: deterministic core (term coverage
+      with inflection tolerance, multi-aspect splitting, corpus-spread requirement) +
+      live LLM refinement with heuristic fallback. Wired as a real **sufficiency node**
+      in the LangGraph graph (`app/agent/graph.py`, bounded loop-back steering) AND as
+      the gate of the deep-research controller.
+- [x] Query reformulation / expansion loop; bounded rounds + latency cap —
+      `app/agent/research.py::run_deep_research` (uncovered-aspect queries, missing-term
+      queries, per-document targeting for "across all X"; `ABA_RESEARCH_*` knobs:
+      max rounds, queries/round, time budget, evidence cap). Off-topic relevance gate →
+      classic grounding-first fallback (the tri-state wall holds).
+- [x] Stream iteration steps into the trace panel — `research_step` SSE events render a
+      live round-by-round timeline while streaming (`ChatThread.tsx`), and the persisted
+      `research_trace` renders as a "Deep research" panel in the inspector Trace tab
+      (`Inspector.tsx`). Toggled per-chat via the composer's "Deep research" chip.
+- [x] Eval: multi-hop + evidence-spread-across-docs cases — `scripts/eval.py` Phase-4
+      block (the spread question must iterate ≥2 rounds and ground + verify citations
+      across ≥4 documents; an out-of-scope deep-research question must still decline)
+      + `tests/test_deep_research.py`.
 
 ## Phase 5 — Reasoning / design mode
 

@@ -180,6 +180,44 @@ export interface AgentTrace {
   steps: AgentStepTrace[];
 }
 
+/* ---------------- deep research (Phase 4) ---------------- */
+export interface ResearchAction {
+  tool: string;                 // "search_documents" | "sql_query"
+  query: string;
+  found: number;
+  added: number;
+  documents?: string[];
+  reason?: string;
+}
+
+export interface ResearchVerdict {
+  sufficient: boolean;
+  coverage: number;
+  missing_terms: string[];
+  missing_aspects: string[];
+  missing_documents: string[];
+  next_queries: { query: string; reason?: string; documents?: string[] }[];
+  reasoning: string;
+  source: string;               // "heuristic" | "llm"
+}
+
+export interface ResearchRound {
+  round: number;
+  actions: ResearchAction[];
+  verdict?: ResearchVerdict | null;
+}
+
+export interface ResearchTrace {
+  question: string;
+  rounds: ResearchRound[];
+  total_rounds: number;
+  stop_reason: string;
+  documents_covered: string[];
+  target_documents?: string[] | null;
+  evidence_count: number;
+  duration_ms: number;
+}
+
 export interface Trace {
   question: string;
   languages: string[];
@@ -200,6 +238,7 @@ export interface Trace {
   generation_steps: GenerationStep[];
   multi_agent_trace?: MultiAgentTrace | null;
   agent_trace?: AgentTrace | null;
+  research_trace?: ResearchTrace | null;
 }
 
 /* ---------------- generative components (Phase 3) ---------------- */
@@ -253,6 +292,7 @@ export interface AskResponse {
   contradictions: ContradictionResult[];
   multi_agent_trace?: MultiAgentTrace | null;
   agent_trace?: AgentTrace | null;
+  research_trace?: ResearchTrace | null;
 }
 
 export interface ExampleQuestion {

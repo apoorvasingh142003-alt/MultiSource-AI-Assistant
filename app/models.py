@@ -178,6 +178,9 @@ class Trace(BaseModel):
     multi_agent_trace: Optional[dict[str, Any]] = None
     # Iterative LangGraph agent timeline (tool calls + observations), when agent_mode is on.
     agent_trace: Optional[dict[str, Any]] = None
+    # Deep-research timeline (Phase 4): retrieval rounds, sufficiency verdicts, stop
+    # reason — the visible record of the iterative search that produced the evidence.
+    research_trace: Optional[dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):
@@ -195,6 +198,8 @@ class AskRequest(BaseModel):
     output_format: Optional[str] = "auto"        # auto|prose|table|timeline_table|json|bullet_points|executive_summary
     multi_agent: bool = False                    # force multi-agent decomposition
     agent_mode: bool = False                     # force the LangGraph iterative agent
+    # Deep research (Phase 4): bounded retrieve → sufficiency-check → reformulate loop.
+    deep_research: bool = False
     temperature: Optional[float] = None          # generation temperature (None == deterministic)
     session_id: Optional[str] = None             # active chat session id
     # Optional explicit prior turns; when omitted the server loads them from session_id.
@@ -257,6 +262,7 @@ class AskResponse(BaseModel):
     contradictions: list[dict[str, Any]] = Field(default_factory=list)
     multi_agent_trace: Optional[dict[str, Any]] = None
     agent_trace: Optional[dict[str, Any]] = None
+    research_trace: Optional[dict[str, Any]] = None
 
 
 # Markers a reasoned (non-grounded) answer carries. Kept in sync with the disclaimers

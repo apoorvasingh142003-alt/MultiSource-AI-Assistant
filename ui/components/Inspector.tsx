@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import type { AskResponse } from "@/lib/types";
+import type { AskResponse, ResearchRound, ResearchTrace } from "@/lib/types";
 import { Card, Collapsible, EmptyState, Icons, Pill, RouteBadge, SectionTitle } from "./ui";
 import {
   CandidatesTable, EvidenceItem, SqlBlock, Stepper, useCiteHighlight,
@@ -60,6 +60,13 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
               </li>
             ))}
           </ol>
+        </Collapsible>
+      )}
+
+      {t.research_trace && (
+        <Collapsible icon={<Icons.search />} title="Deep research — iterative retrieval" defaultOpen
+          right={<Pill tone="indigo">{t.research_trace.total_rounds} round(s)</Pill>}>
+          <ResearchPanel rt={t.research_trace} />
         </Collapsible>
       )}
 
@@ -151,6 +158,86 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+/* ---------- deep research (Phase 4): the iterative-search timeline ---------- */
+
+const STOP_LABELS: Record<string, string> = {
+  sufficient: "evidence sufficient",
+  max_rounds: "round limit reached",
+  time_budget: "time budget reached",
+  no_progress: "no new evidence found",
+  evidence_cap: "evidence cap reached",
+  exhausted: "no further queries to try",
+  off_topic: "retrieved passages were off-topic — declined",
+};
+
+function ResearchRoundBlock({ r }: { r: ResearchRound }) {
+  const v = r.verdict;
+  return (
+    <div className="rounded-xl border border-line bg-surface-2/60 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Pill tone="indigo">round {r.round}</Pill>
+        {v && (
+          <Pill tone={v.sufficient ? "emerald" : "amber"}>
+            {v.sufficient ? <><Icons.check className="h-3 w-3" />sufficient</> : "needs more"}
+          </Pill>
+        )}
+        {v && <Pill>coverage {Math.round(v.coverage * 100)}%</Pill>}
+        {v && <Pill>{v.source === "llm" ? "LLM-checked" : "heuristic check"}</Pill>}
+      </div>
+      <div className="space-y-1.5">
+        {r.actions.map((a, i) => (
+          <div key={i} className="flex items-start gap-2 text-[12px] text-body">
+            <span className="mt-0.5 font-mono text-[10.5px] text-accent">
+              {a.tool === "sql_query" ? "sql" : "search"}
+            </span>
+            <span className="min-w-0">
+              <span className="text-fg">“{a.query}”</span>
+              {!!a.documents?.length && (
+                <span className="text-muted"> in {a.documents.join(", ")}</span>
+              )}
+              <span className="text-muted"> → {a.found} found, {a.added} new</span>
+              {a.reason && <span className="block text-[11px] text-faint">{a.reason}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+      {v && (
+        <p className="mt-2 text-[11.5px] leading-relaxed text-muted">{v.reasoning}</p>
+      )}
+    </div>
+  );
+}
+
+function ResearchPanel({ rt }: { rt: ResearchTrace }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[11.5px] text-faint">
+        Retrieve → sufficiency check → reformulate, repeated until the evidence actually
+        answers the question (bounded). Every round below is what the engine searched and
+        why it kept going or stopped.
+      </p>
+      <div className="space-y-2">
+        {rt.rounds.map((r) => <ResearchRoundBlock key={r.round} r={r} />)}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Pill tone={rt.stop_reason === "sufficient" ? "emerald" : "amber"}>
+          stopped: {STOP_LABELS[rt.stop_reason] ?? rt.stop_reason}
+        </Pill>
+        <Pill>{rt.evidence_count} evidence item(s)</Pill>
+        <Pill>{rt.documents_covered.length} document(s) covered</Pill>
+        <Pill><Icons.clock className="h-3 w-3" />{rt.duration_ms} ms</Pill>
+      </div>
+      {rt.documents_covered.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {rt.documents_covered.map((d) => (
+            <span key={d} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-[10.5px] text-muted ring-1 ring-inset ring-line">{d}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
