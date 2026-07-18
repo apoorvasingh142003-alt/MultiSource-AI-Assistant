@@ -935,6 +935,48 @@ def sheets_import(
 
 
 # ==============================================================================
+# Google Drive (import PDFs / Google Docs from the user's Drive — Phase 6)
+# ==============================================================================
+
+@router.get("/drive/files")
+def drive_files(
+    user: CurrentUser,
+    q: str = "",
+    x_google_access_token: str | None = Header(default=None),
+) -> list[dict]:
+    """The user's recent Drive PDFs/Docs for the import picker. The Google token (with
+    the drive.readonly scope) is forwarded server-side by the Next middleware."""
+    from app.integrations import google_drive as gdrive
+    if not x_google_access_token:
+        raise HTTPException(400, "Google Drive isn't connected — connect it and try again.")
+    try:
+        return gdrive.list_documents(x_google_access_token, q)
+    except gdrive.DriveError as exc:
+        raise HTTPException(400, str(exc))
+
+
+class DriveImport(BaseModel):
+    url: str    # a Drive/Docs link or bare file id
+
+
+@router.post("/drive/import")
+def drive_import(
+    body: DriveImport,
+    user: CurrentUser,
+    x_google_access_token: str | None = Header(default=None),
+) -> dict:
+    """Import one Drive file (PDF as-is; Google Doc exported as PDF) into the caller's
+    isolated engine — chunked, embedded, and citable like any upload."""
+    from app.integrations import google_drive as gdrive
+    if not x_google_access_token:
+        raise HTTPException(400, "Google Drive isn't connected — connect it and try again.")
+    try:
+        return gdrive.import_file_for_user(user.id, x_google_access_token, body.url)
+    except gdrive.DriveError as exc:
+        raise HTTPException(400, str(exc))
+
+
+# ==============================================================================
 # HubSpot CRM (per-tenant, via a Private App token)
 # ==============================================================================
 
@@ -1106,6 +1148,32 @@ def mcp_info(user: CurrentUser) -> dict:
         "tools": [{"name": t["name"], "description": t["description"]}
                   for t in mcp_server.TOOLS],
     }
+
+
+class McpTokenRequest(BaseModel):
+    days: int = 90
+
+
+@router.post("/mcp/token")
+def mcp_token(user: CurrentUser, body: McpTokenRequest = Body(default=McpTokenRequest())) -> dict:
+    """Mint a personal access token for programmatic/MCP clients, scoped to the CALLER's
+    own identity (signed with the same secret the auth dependency verifies). With auth
+    disabled there is nothing to protect — return an explicit no-auth hint instead."""
+    from app import auth as auth_mod
+    s = get_settings()
+    if not s.auth_enabled:
+        return {"auth_enabled": False, "token": None,
+                "note": "Auth is disabled on this deployment — MCP clients can connect "
+                        "without a token."}
+    days = min(max(body.days, 1), 365)
+    try:
+        token, exp = auth_mod.mint_token(user, days=days)
+    except ValueError as exc:
+        raise HTTPException(500, str(exc))
+    return {"auth_enabled": True, "token": token, "expires_at_epoch": int(exp),
+            "days": days,
+            "note": "Send as 'Authorization: Bearer <token>' on /api/mcp. The token acts "
+                    "as you — treat it like a password."}
 
 
 class McpServerCreate(BaseModel):

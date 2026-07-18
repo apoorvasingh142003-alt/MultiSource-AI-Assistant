@@ -9,9 +9,11 @@ Roadmap: [03-ROADMAP.md](../03-ROADMAP.md) Phase 6 · Backlog: [04-BACKLOG.md](.
 > tools; MCP **client** consuming an external MCP server; sandboxed **code execution**
 > gated to analysis intents, shown in the panel.
 
-Deliberately deferred (per the roadmap's own "last, demand-driven" note): **Google Drive
-connector** and **live WhatsApp validation** (the channel code exists; validating the Meta
-Cloud webhook needs real Meta credentials + a business number — a client-driven task).
+**Google Drive connector** shipped in this phase too (see §5). Still deferred (per the
+roadmap's own "last, demand-driven" note): **live WhatsApp validation** — the channel code
+exists, but validating the Meta Cloud webhook needs real Meta credentials + a business
+number (`ABA_WHATSAPP_ACCESS_TOKEN` / `ABA_WHATSAPP_PHONE_NUMBER_ID` are unset on this
+deployment), so it stays a client-driven task.
 
 ## Design (wall-safe by construction)
 
@@ -94,6 +96,30 @@ Gated, deterministic, visible:
   labeled "Computed from the cited rows (sandboxed)" block. Derived from grounded rows →
   stays grounded; the block is additive, never a new unlabeled stream.
 
+### 5. Google Drive connector (`app/integrations/google_drive.py`) + MCP token minting
+
+Mirrors the proven Google Sheets pattern (incremental OAuth handled by the Next layer; the
+user's `drive.readonly` access token is forwarded server-side by the middleware, never by
+the browser). Two operations, both into the caller's isolated engine:
+
+- `list_documents()` — Drive `files.list` for PDFs + Google Docs (recent first), so the UI
+  can offer a "Browse recent" picker as well as a paste-a-link box.
+- `import_file_for_user()` — accepts a Drive file URL or id. A native **PDF** is downloaded
+  via `files/{id}?alt=media`; a **Google Doc** is exported to PDF via `files/{id}/export?
+  mimeType=application/pdf` (the mime type is fully percent-encoded — `urllib.parse.quote`
+  leaves `/` alone by default, which silently broke export until `safe=""`). The bytes flow
+  straight into the existing `engine.add_pdf` path, so a Drive doc is chunked, embedded, and
+  citable exactly like an uploaded PDF — no new retrieval code. Endpoints: `GET /drive/files`,
+  `POST /drive/import`. UI: `DriveConnect.tsx` (connect tile + link/browse import), a Drive
+  brand mark, and the `driveConnected` session flag (scope-derived, like Sheets).
+
+**MCP production-auth gap closed.** `app/auth.py::mint_token` issues a long-lived HS256
+identity JWT for the *caller's own* identity, signed with the same `ABA_AUTH_SECRET` that
+`verify_jwt` checks — so a signed-in user can get a bearer token for external MCP clients
+without an admin handling the server secret. `POST /mcp/token` exposes it (returns an
+explicit "auth disabled" hint when there's nothing to protect); the Sources-tab MCP section
+shows the server address AND a "generate access token" control.
+
 ## Changes
 
 ### Backend
@@ -126,7 +152,8 @@ Gated, deterministic, visible:
     suggested escalation and stays `insufficient`; execute without webhook → `simulated` +
     logged; MCP `tools/list`/`tools/call` grounded round-trip; compute question → sandboxed
     stats present on a grounded SQL answer.
-15. `tests/test_actions.py`, `tests/test_mcp.py`, `tests/test_code_exec.py`.
+15. `tests/test_actions.py`, `tests/test_mcp.py`, `tests/test_code_exec.py`,
+    `tests/test_google_drive.py`.
 
 ## Status
 
@@ -170,3 +197,28 @@ Gated, deterministic, visible:
       going live is pasting the webhook URL in Sources → Actions & automations), and
       in-browser click-through (no browser in this environment — flows exercised at the
       HTTP layer the UI uses, bundle presence confirmed).
+
+### Second pass — Google Drive connector + MCP token minting
+
+- [x] **Google Drive connector** (`app/integrations/google_drive.py`) — mirrors the
+      Sheets pattern: the user grants `drive.readonly` via incremental OAuth (Next layer),
+      the access token is forwarded server-side by the middleware as `X-Google-Access-Token`,
+      never touched by the browser. `GET /api/drive/files` lists recent PDFs + Google Docs;
+      `POST /api/drive/import` pulls one file (a PDF is downloaded via `alt=media`; a Google
+      Doc is exported to PDF via `/export?mimeType=application/pdf`) into the tenant's
+      isolated engine through the existing `add_pdf` path — so a Drive doc is chunked,
+      embedded, and citable exactly like an upload. `DriveConnect.tsx` (browse-or-paste),
+      brand mark + account-menu tile, `driveConnected` session flag.
+- [x] **MCP personal-access-token minting** (`app/auth.py::mint_token`, `POST /api/mcp/token`) —
+      closes the production-auth gap flagged in pass 1: a signed-in user mints a long-lived
+      (default 90-day) HS256 bearer, signed with the same `ABA_AUTH_SECRET` the auth
+      dependency verifies and carrying only the caller's own identity, so external MCP
+      clients authenticate as that user on `/api/mcp` without an admin sharing the server
+      secret. Auth-off deployments return an explicit "no token needed" hint. UI: a
+      "Generate access token" control in the Sources-tab automation panel.
+- [x] Tests + eval green offline — pytest **278 passed / 10 skipped** (9 new in
+      `tests/test_google_drive.py`: id parsing, PDF download, Google-Doc PDF export with the
+      correct `mimeType` encoding, engine import round-trip, token mint/verify);
+      `scripts/eval.py` **22/22 offline** (unchanged — the connectors are per-tenant HTTP
+      surfaces, not part of the offline demo corpus).
+- [x] tsc + next build green (via the /home clone workflow).

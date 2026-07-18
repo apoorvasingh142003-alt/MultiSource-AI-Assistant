@@ -161,7 +161,11 @@ configured — demo-able offline). MCP is hand-rolled Streamable-HTTP JSON-RPC o
       an explicit statistical ask; deterministic codegen, AST validation, `python -I -S`
       subprocess with rlimits + wall-clock kill; code+output in the inspector Trace tab,
       answer gains a labeled "Computed from the cited rows" block.
-- [ ] Google Drive connector — deferred, demand-driven (per the roadmap's own note).
+- [x] Google Drive connector (`app/integrations/google_drive.py`): incremental OAuth for
+      `drive.readonly`, list recent PDFs/Google Docs, import a PDF (or a Google Doc exported
+      to PDF) into the tenant's engine via the existing `add_pdf` path — chunked, embedded,
+      citable. Endpoints `/drive/files` + `/drive/import`; `DriveConnect.tsx` in the account
+      menu (browse recent or paste a link). Google access token forwarded server-side only.
 - [ ] WhatsApp live validation (Meta Cloud webhook + 24h window) — deferred: the channel
       code exists; validating live needs a client's Meta credentials + business number.
 

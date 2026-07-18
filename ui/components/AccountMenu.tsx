@@ -3,6 +3,7 @@ import React from "react";
 import { signOut, useSession } from "next-auth/react";
 import { Icons, cn } from "@/components/ui";
 import SheetsConnect from "@/components/SheetsConnect";
+import DriveConnect from "@/components/DriveConnect";
 import HubSpotConnect from "@/components/HubSpotConnect";
 import TelegramConnect from "@/components/TelegramConnect";
 import WhatsAppConnect from "@/components/WhatsAppConnect";
@@ -83,6 +84,7 @@ function Menu() {
             </div>
             <div className="space-y-2">
               <SheetsConnect open={openApp === "sheets"} onToggle={() => toggleApp("sheets")} />
+              <DriveConnect open={openApp === "drive"} onToggle={() => toggleApp("drive")} />
               <HubSpotConnect open={openApp === "hubspot"} onToggle={() => toggleApp("hubspot")} />
               <TelegramConnect open={openApp === "telegram"} onToggle={() => toggleApp("telegram")} />
               <WhatsAppConnect open={openApp === "whatsapp"} onToggle={() => toggleApp("whatsapp")} />
