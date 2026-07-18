@@ -186,6 +186,13 @@ class Trace(BaseModel):
     # Deep-research timeline (Phase 4): retrieval rounds, sufficiency verdicts, stop
     # reason — the visible record of the iterative search that produced the evidence.
     research_trace: Optional[dict[str, Any]] = None
+    # Actions (Phase 6): proposed action-tool invocations attached to this turn — a
+    # detected action command or a suggested escalation. Proposals only; execution is a
+    # separate, user-confirmed API call whose audit trail lives in the state DB.
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    # Sandboxed code execution (Phase 6): {code, output, ok, duration_ms, source_rows} —
+    # the deterministic analysis script run over the cited SQL rows, shown in the panel.
+    code_execution: Optional[dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):
@@ -248,6 +255,40 @@ class AnswerComponent(BaseModel):
     body: str = ""
 
 
+class ProposedAction(BaseModel):
+    """An action-tool invocation the assistant PROPOSES for this turn (Phase 6).
+
+    Never self-executing: the card the UI renders from this is an explicit external-write
+    surface ("sends to your n8n workflow") with editable params and a Confirm button —
+    execution is a separate ``POST /actions/execute`` the user triggers. ``origin``
+    distinguishes an explicit user command from a system suggestion (e.g. the escalate
+    offer attached to an insufficient answer). Proposals carry no knowledge claims, so
+    they live OUTSIDE the tri-state wall: they never alter an answer's ``answer_state``.
+    """
+
+    id: str
+    action: str                                # catalog name ("create_lead", …)
+    title: str
+    description: str
+    params: dict[str, str] = Field(default_factory=dict)
+    required: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)   # required params not yet filled
+    origin: Literal["command", "suggested"] = "command"
+    configured: bool = False                   # tenant has an n8n webhook for this action
+    enabled: bool = True
+
+
+class ActionResult(BaseModel):
+    """The audited outcome of one confirmed action execution."""
+
+    id: str
+    action: str
+    status: Literal["executed", "simulated", "error"]
+    detail: str = ""
+    params: dict[str, str] = Field(default_factory=dict)
+    created_at: str = ""
+
+
 class AskResponse(BaseModel):
     question: str
     answer: str
@@ -260,6 +301,13 @@ class AskResponse(BaseModel):
     # Generative UI components (Phase 3) — deterministic views over the grounded evidence
     # (cited table / chart / timeline / clause artifact). Empty for reasoned/insufficient.
     components: list[AnswerComponent] = Field(default_factory=list)
+    # Proposed actions (Phase 6): an explicit action command's proposal, or a suggested
+    # escalation on an insufficient answer. Confirm-to-execute; see ProposedAction.
+    actions: list[ProposedAction] = Field(default_factory=list)
+    # True when this turn is a pure action command (no retrieval ran, the answer text is a
+    # procedural acknowledgment with no knowledge claims). The UI suppresses the tri-state
+    # chip for these turns — the ActionCard is its own clearly-labeled surface.
+    action_only: bool = False
     trace: Trace
     # --- new fields (Sections 8, 10) ---
     verification_warning: Optional[str] = None

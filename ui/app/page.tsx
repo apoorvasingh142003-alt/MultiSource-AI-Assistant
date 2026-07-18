@@ -459,7 +459,7 @@ export default function Page() {
                 <Welcome examples={examples} onPick={run} onUpload={() => { setInspectorTab("sources"); setInspectorOpen(true); }} />
               ) : (
                 <ChatThread
-                  turns={turns} busy={busy}
+                  turns={turns} busy={busy} sessionId={activeSessionId}
                   onEditQuestion={editTurn} onDeleteTurn={deleteTurn} onRegenerate={regenerateTurn}
                   onInspect={openInspector} onCite={openCitation} activeInspectId={inspectId}
                 />

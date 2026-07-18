@@ -26,10 +26,12 @@ _MAX_SUFFICIENCY_PASSES = 2
 
 def build_agent_graph(ctx: AgentRunContext, model: str, settings,
                       temperature: float | None = None,
-                      question: str | None = None):
+                      question: str | None = None,
+                      extra_tools: list | None = None):
     """Compile the agent graph bound to a run context. ChatOpenAI targets the same
-    OpenAI-compatible endpoint the rest of the app uses (OpenAI / Groq / Ollama / …)."""
-    tools = make_tools(ctx)
+    OpenAI-compatible endpoint the rest of the app uses (OpenAI / Groq / Ollama / …).
+    ``extra_tools`` lets the runner add a tenant's external MCP tools (Phase 6)."""
+    tools = make_tools(ctx) + list(extra_tools or [])
     llm = ChatOpenAI(
         model=model,
         api_key=settings.openai_key or "no-key",

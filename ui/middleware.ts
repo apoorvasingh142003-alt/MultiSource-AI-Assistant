@@ -36,8 +36,12 @@ export async function middleware(req: NextRequest) {
       headers.delete("x-google-access-token");
     }
   } else {
-    // Never let a client-supplied Authorization / Google token through unauthenticated.
-    headers.delete("authorization");
+    // No browser session: let a client-supplied Authorization header PASS THROUGH to the
+    // backend, which verifies the HS256 signature against ABA_AUTH_SECRET itself (a forged
+    // token fails there). This is what lets programmatic clients — above all external MCP
+    // clients hitting /api/mcp (Phase 6) — authenticate with a backend-issued bearer token
+    // when there is no Google session. The Google access token is still never trusted from
+    // the client: it is only ever set server-side from the session above.
     headers.delete("x-google-access-token");
   }
 

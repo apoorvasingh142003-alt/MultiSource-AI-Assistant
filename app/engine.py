@@ -256,6 +256,15 @@ class Engine:
         on_event=None,
     ):
         with self._lock:
+            # Action command (Phase 6): an explicit "create a lead for … / escalate this /
+            # raise an invoice …" message is a WRITE request, not a question — no retrieval
+            # runs, and nothing is dispatched. The response carries a ProposedAction the
+            # user must confirm (POST /actions/execute) before anything leaves the system.
+            from app.actions.detect import detect_action_command
+            cmd = detect_action_command(question)
+            if cmd is not None:
+                return self._action_command_response(question, cmd)
+
             allowed_docs, allowed_tables = self._scope_sources(scope)
             if scope == "workspace" and not allowed_docs and not allowed_tables:
                 return self._empty_workspace_response(question)
@@ -300,7 +309,7 @@ class Engine:
                         custom_system_prompt=custom_system_prompt, agent_role=agent_role,
                         output_format=output_format, temperature=temperature,
                         conversation_history=conversation_history, on_token=on_token,
-                        on_event=on_event,
+                        on_event=on_event, user_id=self.user_id,
                     )
                     return self._finalize(resp)
 
@@ -343,7 +352,79 @@ class Engine:
         resp.components = build_components(
             resp.question, resp.answer_state, resp.trace, resp.trace.evidence
         )
+        # Sandboxed computation (Phase 6): gated inside maybe_compute to grounded answers
+        # with SQL rows AND an explicit statistical ask. The appended block is labeled
+        # "computed from the cited rows"; a failed run surfaces in the trace only.
+        try:
+            from app.code_exec import maybe_compute
+            code_exec, block = maybe_compute(resp.question, resp.answer_state, resp.trace)
+            if code_exec is not None:
+                resp.trace.code_execution = code_exec
+                if block:
+                    resp.answer = resp.answer.rstrip() + block
+                    resp.trace.notes.append(
+                        "Sandboxed computation ran over the retrieved SQL rows "
+                        f"({code_exec.get('source_rows', 0)} row(s)); code + output are in the trace."
+                    )
+        except Exception:  # analysis must never take down an answer
+            pass
+        # Escalate when unsure (Phase 6): an insufficient answer additionally offers a
+        # one-click human handoff. The honest decline stays the honest decline — the
+        # label/chip are untouched; the suggestion is a separate, clearly-labeled card.
+        try:
+            if resp.answer_state == "insufficient":
+                from app.actions.service import build_proposal, get_config
+                if get_config(self.user_id, "escalate")["enabled"]:
+                    proposal = build_proposal(
+                        self.user_id, "escalate",
+                        {"reason": f"The assistant could not answer: {resp.question}",
+                         "context": (resp.answer or "")[:400]},
+                        origin="suggested",
+                    )
+                    resp.actions.append(proposal)
+                    resp.trace.actions.append(proposal.model_dump())
+                    resp.trace.notes.append(
+                        "Insufficient evidence — offered a human-handoff escalation "
+                        "(confirm-to-send; the answer label is unchanged)."
+                    )
+        except Exception:
+            pass
         return resp
+
+    def _action_command_response(self, question: str, cmd):
+        """A pure action command's turn: a deterministic procedural acknowledgment plus
+        the ProposedAction. No retrieval, no knowledge claims, nothing dispatched."""
+        from app.actions.service import build_proposal
+        from app.models import AskResponse, RouteDecision, Trace
+        proposal = build_proposal(self.user_id, cmd.action, cmd.params, origin="command")
+        needs = (
+            f" Fill in {', '.join(proposal.missing)} before confirming."
+            if proposal.missing else ""
+        )
+        dest = (
+            "your n8n workflow" if proposal.configured
+            else "the local audit log (no n8n webhook is configured yet — add one under "
+                 "Sources → Actions & automations to go live)"
+        )
+        answer = (
+            f"I've prepared a **{proposal.title}** action from your message — review the "
+            f"details below and confirm to send it to {dest}.{needs} Nothing is sent "
+            "until you confirm."
+        )
+        trace = Trace(
+            question=question,
+            route=RouteDecision(route="NONE", confidence=1.0,
+                                reasoning="Action command — no retrieval performed."),
+            notes=[cmd.reason,
+                   "Proposal only: execution requires an explicit user confirmation."],
+            mode="deterministic",
+            actions=[proposal.model_dump()],
+        )
+        return AskResponse(
+            question=question, answer=answer, insufficient=False,
+            answer_state="grounded",  # procedural ack; the UI hides the chip (action_only)
+            citations=[], actions=[proposal], action_only=True, trace=trace,
+        )
 
     def _scope_sources(self, scope: str):
         """Resolve a scope to the document names + table names it may use.

@@ -1,7 +1,7 @@
 import type {
-  AppConfig, AskResponse, ExampleQuestion, IngestResult, Inventory,
-  Message, ModelModeStatus, Session, SourceInfo, Workspace, WorkspaceArtifact,
-  ProjectMemory, Workflow,
+  ActionConfig, ActionLogEntry, ActionResult, AppConfig, AskResponse, ExampleQuestion,
+  IngestResult, Inventory, McpInfo, McpServer, Message, ModelModeStatus, Session,
+  SourceInfo, Workspace, WorkspaceArtifact, ProjectMemory, Workflow,
 } from "./types";
 
 // All API calls go through the UI's own origin at /api/*, which the Next server proxies
@@ -352,6 +352,57 @@ export async function hubspotSync(): Promise<HubSpotImport> {
 }
 export async function hubspotDisconnect(): Promise<void> {
   await postJSON("/hubspot/disconnect", {});
+}
+
+/* ---- actions (Phase 6: n8n write layer; propose → confirm → execute) ---- */
+export async function fetchActions(): Promise<ActionConfig[]> {
+  return getJSON<ActionConfig[]>("/actions");
+}
+
+export async function updateActionConfig(
+  action: string,
+  patch: { webhook_url?: string; secret?: string; enabled?: boolean },
+): Promise<{ action: string; configured: boolean; enabled: boolean }> {
+  return postJSON("/actions/config", { action, ...patch });
+}
+
+export async function executeAction(
+  action: string, params: Record<string, string>, sessionId?: string | null,
+): Promise<ActionResult> {
+  return postJSON<ActionResult>("/actions/execute", {
+    action, params, ...(sessionId ? { session_id: sessionId } : {}),
+  });
+}
+
+export async function fetchActionLog(): Promise<ActionLogEntry[]> {
+  return getJSON<ActionLogEntry[]>("/actions/log");
+}
+
+/* ---- MCP (Phase 6: engine as MCP server + external MCP servers as tools) ---- */
+export async function fetchMcpInfo(): Promise<McpInfo> {
+  return getJSON<McpInfo>("/mcp/info");
+}
+
+export async function fetchMcpServers(): Promise<McpServer[]> {
+  return getJSON<McpServer[]>("/mcp/servers");
+}
+
+export async function addMcpServer(
+  name: string, url: string, authHeader?: string,
+): Promise<McpServer> {
+  return postJSON<McpServer>("/mcp/servers", {
+    name, url, ...(authHeader ? { auth_header: authHeader } : {}),
+  });
+}
+
+export async function removeMcpServer(id: string): Promise<void> {
+  return deleteJSON(`/mcp/servers/${id}`);
+}
+
+export async function fetchMcpServerTools(
+  id: string,
+): Promise<{ name: string; description?: string }[]> {
+  return getJSON(`/mcp/servers/${id}/tools`);
 }
 
 /* ---- workspaces (Section 7) ---- */

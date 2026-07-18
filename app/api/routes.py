@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app import runtime
@@ -1013,3 +1013,157 @@ def whatsapp_status(user: CurrentUser) -> dict:
 def whatsapp_unlink(user: CurrentUser) -> dict:
     wa.unlink(user.id)
     return {"ok": True}
+
+
+# ==============================================================================
+# Actions (Phase 6) — the n8n write layer. Propose → CONFIRM → execute:
+# chat turns only ever carry proposals; this is the single execution chokepoint.
+# ==============================================================================
+
+@router.get("/actions")
+def actions_catalog(user: CurrentUser) -> list[dict]:
+    """The action catalog + this tenant's config status (secrets never leave the server)."""
+    from app.actions import service as actions
+    return actions.list_configs(user.id)
+
+
+class ActionConfigUpdate(BaseModel):
+    action: str
+    webhook_url: str | None = None    # None = leave unchanged; "" = clear
+    secret: str | None = None
+    enabled: bool | None = None
+
+
+@router.post("/actions/config")
+def actions_config(body: ActionConfigUpdate, user: CurrentUser) -> dict:
+    from app.actions import service as actions
+    try:
+        return actions.set_config(user.id, body.action, webhook_url=body.webhook_url,
+                                  secret=body.secret, enabled=body.enabled)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+class ActionExecute(BaseModel):
+    action: str
+    params: dict[str, str] = {}
+    session_id: str | None = None
+
+
+@router.post("/actions/execute")
+def actions_execute(body: ActionExecute, user: CurrentUser) -> dict:
+    """Execute a CONFIRMED action: dispatch to the tenant's n8n webhook (or record a
+    simulated run when none is configured) and audit-log the outcome."""
+    from app.actions import service as actions
+    if body.session_id:
+        _guard_session_access(body.session_id, user.id)
+    result = actions.execute(user.id, body.action, body.params, session_id=body.session_id)
+    return json.loads(result.model_dump_json())
+
+
+@router.get("/actions/log")
+def actions_log(user: CurrentUser) -> list[dict]:
+    from app.actions import service as actions
+    return actions.list_log(user.id)
+
+
+# ==============================================================================
+# MCP (Phase 6) — the engine as an MCP server (Streamable HTTP), plus the
+# tenant's registry of external MCP servers consumed as tools (client side).
+# ==============================================================================
+
+@router.post("/mcp")
+async def mcp_endpoint(request: Request, user: CurrentUser):
+    """MCP Streamable-HTTP endpoint (JSON-RPC 2.0): initialize / ping / tools/list /
+    tools/call over the caller's isolated engine. Notifications get 202."""
+    from fastapi.responses import Response
+    from app.mcp import server as mcp_server
+    payload = mcp_server.parse_body(await request.body())
+    if payload is None:
+        return JSONResponse({"jsonrpc": "2.0", "id": None,
+                             "error": {"code": -32700, "message": "Parse error."}})
+    if isinstance(payload, list):  # legacy batch (pre-2025-06-18 clients)
+        responses = [r for r in (mcp_server.handle_message(m, user.id) for m in payload)
+                     if r is not None]
+        if not responses:
+            return Response(status_code=202)
+        return JSONResponse(responses)
+    response = mcp_server.handle_message(payload, user.id)
+    if response is None:
+        return Response(status_code=202)
+    return JSONResponse(response)
+
+
+@router.get("/mcp/info")
+def mcp_info(user: CurrentUser) -> dict:
+    """What to paste into an MCP client to consume this tenant's knowledge base."""
+    from app.mcp import server as mcp_server
+    s = get_settings()
+    return {
+        "url": f"{s.public_base_url.rstrip('/')}/api/mcp",
+        "transport": "streamable-http",
+        "protocol_version": mcp_server.PROTOCOL_VERSION,
+        "tools": [{"name": t["name"], "description": t["description"]}
+                  for t in mcp_server.TOOLS],
+    }
+
+
+class McpServerCreate(BaseModel):
+    name: str
+    url: str
+    auth_header: str = ""
+
+
+@router.get("/mcp/servers")
+def mcp_servers_list(user: CurrentUser) -> list[dict]:
+    from app.mcp import registry
+    return registry.list_servers(user.id)
+
+
+@router.post("/mcp/servers", status_code=201)
+def mcp_servers_add(body: McpServerCreate, user: CurrentUser) -> dict:
+    from app.mcp import registry
+    try:
+        return registry.add_server(user.id, body.name, body.url, body.auth_header)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.delete("/mcp/servers/{server_id}")
+def mcp_servers_remove(server_id: str, user: CurrentUser) -> dict:
+    from app.mcp import registry
+    if not registry.remove_server(user.id, server_id):
+        raise HTTPException(404, "MCP server not found")
+    return {"ok": True}
+
+
+@router.get("/mcp/servers/{server_id}/tools")
+def mcp_server_tools(server_id: str, user: CurrentUser) -> list[dict]:
+    from app.mcp import registry
+    from app.mcp.client import MCPClient, MCPError
+    server = registry.get_server(user.id, server_id)
+    if not server:
+        raise HTTPException(404, "MCP server not found")
+    try:
+        return MCPClient(server["url"], auth_header=server["auth_header"]).list_tools()
+    except MCPError as exc:
+        raise HTTPException(502, str(exc))
+
+
+class McpToolCall(BaseModel):
+    tool: str
+    arguments: dict = {}
+
+
+@router.post("/mcp/servers/{server_id}/call")
+def mcp_server_call(server_id: str, body: McpToolCall, user: CurrentUser) -> dict:
+    from app.mcp import registry
+    from app.mcp.client import MCPClient, MCPError
+    server = registry.get_server(user.id, server_id)
+    if not server:
+        raise HTTPException(404, "MCP server not found")
+    try:
+        client = MCPClient(server["url"], auth_header=server["auth_header"])
+        return client.call_tool(body.tool, body.arguments)
+    except MCPError as exc:
+        raise HTTPException(502, str(exc))
