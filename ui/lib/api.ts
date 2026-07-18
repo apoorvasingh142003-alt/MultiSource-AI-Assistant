@@ -338,6 +338,47 @@ export async function importSheet(url: string): Promise<SheetImportResult> {
   return postJSON<SheetImportResult>("/sheets/import", { url });
 }
 
+/* ---- Google Drive (Phase 6) ---- */
+export interface DriveFile {
+  id: string;
+  name: string;
+  kind: "pdf" | "gdoc";
+  modified: string;
+  size?: number | null;
+}
+export interface DriveImportResult {
+  ok: boolean; name: string; source: string; chunks_indexed: number;
+  pages?: number | null; status: string; error?: string | null;
+}
+export async function driveFiles(q = ""): Promise<DriveFile[]> {
+  return getJSON<DriveFile[]>(`/drive/files${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+}
+export async function driveImport(url: string): Promise<DriveImportResult> {
+  const res = await fetch(`${apiBase()}/drive/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try { detail = (await res.json())?.detail ?? detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+/* ---- MCP access token (Phase 6) ---- */
+export interface McpTokenResult {
+  auth_enabled: boolean;
+  token: string | null;
+  expires_at_epoch?: number;
+  days?: number;
+  note: string;
+}
+export async function mintMcpToken(days = 90): Promise<McpTokenResult> {
+  return postJSON<McpTokenResult>("/mcp/token", { days });
+}
+
 /* ---- HubSpot CRM ---- */
 export interface HubSpotStatus { connected: boolean }
 export interface HubSpotImport { ok: boolean; imported: Record<string, number>; status: string }

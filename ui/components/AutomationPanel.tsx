@@ -3,7 +3,7 @@ import React from "react";
 import type { ActionConfig, McpInfo, McpServer } from "@/lib/types";
 import {
   addMcpServer, fetchActions, fetchMcpInfo, fetchMcpServers, fetchMcpServerTools,
-  removeMcpServer, updateActionConfig,
+  mintMcpToken, removeMcpServer, updateActionConfig,
 } from "@/lib/api";
 import { Button, Card, Icons, Pill, cn } from "./ui";
 
@@ -73,11 +73,68 @@ export default function AutomationPanel() {
                 <Icons.copy className="h-3.5 w-3.5" />
               </Button>
             </div>
+            <McpTokenMint />
           </div>
         )}
         <ExternalServers servers={servers} setServers={setServers} />
       </Card>
     </>
+  );
+}
+
+/* Mint a personal access token for external MCP clients (shown ONCE; acts as the
+ * signed-in user — the backend signs it with the same secret the auth layer verifies). */
+function McpTokenMint() {
+  const [token, setToken] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+
+  const mint = async () => {
+    setBusy(true);
+    try {
+      const r = await mintMcpToken(90);
+      setToken(r.token);
+      setNote(r.note);
+    } catch {
+      setNote("Could not mint a token.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="mt-2 border-t border-line pt-2">
+      {!token ? (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-faint">
+            External clients authenticate with a personal access token (90 days).
+          </span>
+          <button onClick={mint} disabled={busy}
+            className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-violet-600 transition hover:bg-violet-50 disabled:opacity-50 dark:text-violet-300 dark:hover:bg-violet-500/10">
+            {busy ? "Minting…" : "Generate access token"}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <div className="flex items-center gap-1.5">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[10.5px] text-fg ring-1 ring-inset ring-line">
+              {token}
+            </code>
+            <Button variant="ghost" size="sm" title="Copy token"
+              onClick={async () => {
+                await navigator.clipboard.writeText(token);
+                setCopied(true); setTimeout(() => setCopied(false), 1500);
+              }}>
+              {copied ? <Icons.check className="h-3.5 w-3.5 text-emerald-500" /> : <Icons.copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+          <p className="mt-1 text-[10.5px] text-faint">
+            Copy it now — it isn&apos;t stored and won&apos;t be shown again.
+          </p>
+        </div>
+      )}
+      {note && <p className="mt-1 text-[10.5px] text-muted">{note}</p>}
+    </div>
   );
 }
 

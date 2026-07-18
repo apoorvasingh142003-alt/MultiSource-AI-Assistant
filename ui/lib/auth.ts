@@ -63,10 +63,12 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (session.user) (session.user as { id?: string }).id = token.sub as string;
-      // Surface whether the Sheets scope has been granted (never expose the token itself).
+      // Surface which Google scopes have been granted (never expose the token itself).
       const scope = (token as Record<string, unknown>).scope;
       (session as unknown as Record<string, unknown>).sheetsConnected =
         typeof scope === "string" && scope.includes("spreadsheets");
+      (session as unknown as Record<string, unknown>).driveConnected =
+        typeof scope === "string" && scope.includes("drive.readonly");
       return session;
     },
   },

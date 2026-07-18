@@ -90,6 +90,38 @@ def upsert_user(user_id: str, email: str = "", name: str = "", picture: str = ""
 
 
 # ---------------------------------------------------------------------------
+# Token minting (Phase 6): personal access tokens for programmatic clients
+# ---------------------------------------------------------------------------
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def mint_token(user: "User", days: int = 90) -> tuple[str, float]:
+    """Mint a long-lived HS256 identity JWT for THIS user, signed with the same
+    ``ABA_AUTH_SECRET`` that ``verify_jwt`` checks. This is how a signed-in user gets a
+    bearer token for programmatic clients — above all external MCP clients on ``/api/mcp``
+    — without an admin touching the server secret. The token carries only the caller's
+    own identity, so it grants exactly what their session already grants.
+
+    Returns (token, exp_epoch_seconds). Raises ValueError when no secret is configured.
+    """
+    s = get_settings()
+    secret = (s.auth_secret or "").strip()
+    if not secret:
+        raise ValueError("ABA_AUTH_SECRET is not configured — cannot mint tokens.")
+    exp = time.time() + max(1, int(days)) * 86400
+    head = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = _b64url_encode(json.dumps({
+        "sub": user.id, "email": user.email, "name": user.name,
+        "iat": int(time.time()), "exp": int(exp), "kind": "pat",
+    }).encode())
+    sig = _b64url_encode(
+        hmac.new(secret.encode(), f"{head}.{payload}".encode(), hashlib.sha256).digest()
+    )
+    return f"{head}.{payload}.{sig}", exp
+
+
+# ---------------------------------------------------------------------------
 # The dependency every user-owned route depends on
 # ---------------------------------------------------------------------------
 def get_current_user(

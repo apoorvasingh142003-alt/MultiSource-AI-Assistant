@@ -52,6 +52,16 @@ export function WhatsAppMark({ className }: P) {
   );
 }
 
+export function DriveMark({ className }: P) {
+  return (
+    <svg viewBox="0 0 24 24" className={box(className)} aria-hidden="true">
+      <path fill="#FFBA00" d="M8.65 3h6.7L9.1 14.4 5.75 20 2.4 14.4z" />
+      <path fill="#4285F4" d="M15.35 3l6.25 11.4h-6.7L8.65 3z" />
+      <path fill="#1EA362" d="M9.1 14.4h12.5L18.25 20H5.75z" />
+    </svg>
+  );
+}
+
 export function HubSpotMark({ className }: P) {
   return (
     <svg viewBox="0 0 24 24" className={box(className)} aria-hidden="true">
@@ -68,6 +78,7 @@ export const BRAND: Record<
   { label: string; Mark: (p: P) => JSX.Element; ring: string; glow: string }
 > = {
   sheets: { label: "Google Sheets", Mark: SheetsMark, ring: "ring-emerald-200 dark:ring-emerald-500/30", glow: "bg-emerald-50 dark:bg-emerald-500/10" },
+  drive: { label: "Google Drive", Mark: DriveMark, ring: "ring-blue-200 dark:ring-blue-500/30", glow: "bg-blue-50 dark:bg-blue-500/10" },
   hubspot: { label: "HubSpot", Mark: HubSpotMark, ring: "ring-orange-200 dark:ring-orange-500/30", glow: "bg-orange-50 dark:bg-orange-500/10" },
   telegram: { label: "Telegram", Mark: TelegramMark, ring: "ring-sky-200 dark:ring-sky-500/30", glow: "bg-sky-50 dark:bg-sky-500/10" },
   whatsapp: { label: "WhatsApp", Mark: WhatsAppMark, ring: "ring-green-200 dark:ring-green-500/30", glow: "bg-green-50 dark:bg-green-500/10" },
