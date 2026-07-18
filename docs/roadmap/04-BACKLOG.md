@@ -108,22 +108,62 @@ on the Anthropic/offline deployments; the LangGraph path additionally got the sa
 
 ## Phase 5 — Reasoning / design mode
 
-- [ ] Strengthen `generate_grounded_advice` (`app/generation/generate.py`) for design/strategy Qs.
-- [ ] Document-intelligence prompts: clause analysis, gap analysis, risk ID over retrieved evidence.
-- [ ] Ensure advice answers always carry the reasoned-advice label + disclaimer; never fabricate facts.
-- [ ] Eval: advice questions produce structured, grounded, correctly-labeled output.
+See [plans/05-REASONING-plan.md](plans/05-REASONING-plan.md). **Design note:** one
+deterministic detector (`app/retrieval/intent.py::detect_reasoning_mode` → advice /
+design / analysis / plain), three wall-safe treatments — advice/design get the two-part
+grounded-facts + labelled-guidance answer (reasoned); analysis stays a grounded,
+cited document-intelligence answer.
+
+- [x] Strengthen `generate_grounded_advice` for design/strategy Qs — `mode="design"`
+      turns Part 2 into a structured deliverable (situation → options → recommendations
+      → risks → next steps); real streaming; extractive+structured deterministic
+      fallback so offline demos still ground Part 1 and cite it. **Crucially, the
+      advice path now also fires when retrieval FOUND evidence** (before, a design
+      question with retrieved contracts got the plain factual prompt), gated by the
+      deterministic `_on_topic` check so guidance is never grounded in off-topic text.
+- [x] Document-intelligence prompts — `analysis` reasoning mode appends a DOCUMENT
+      INTELLIGENCE directive (findings per document/clause, every finding cited,
+      absences stated as facts about the record only) to grounded generation; answer
+      stays `grounded`. Deep research honours the same modes for its final answer.
+- [x] Advice answers always carry the reasoned-advice label + disclaimer — the exact
+      `ADVICE_GUIDANCE_DISCLAIMER` sentence is enforced post-generation, and
+      `compute_answer_state` lands every advice/design answer on `reasoned`. Grouped
+      citation markers ("[e1, e2]") are normalized so a grounded Part 1 always passes
+      verification. `Trace.reasoning_mode` surfaces the mode in the inspector.
+- [x] Eval: `scripts/eval.py` Phase-5 block (design → reasoned + cited + verified +
+      disclaimed; analysis → grounded + verified; off-corpus advice → disclaimed, never
+      fabricated, never a bare decline) + `tests/test_reasoning_mode.py`.
 
 ## Phase 6 — Actions & integrations
 
-- [ ] Action-tool framework: LLM tools that POST to n8n webhooks (config per tenant).
-  - [ ] `create_lead` / CRM write.
-  - [ ] `escalate` (hand off to human).
-  - [ ] Vertical action (e.g. `create_invoice` → QuickBooks via n8n / MCP).
-- [ ] MCP **server**: expose `search_documents`, `sql_query`, `ingest_*` (Python `mcp` SDK).
-- [ ] MCP **client**: consume one external MCP server (e.g. QuickBooks) as tools.
-- [ ] Sandboxed code execution (Pyodide or e2b), gated to analysis intents, shown in trace.
-- [ ] Google Drive connector.
-- [ ] WhatsApp channel (validate the Meta Cloud webhook + 24h window live).
+See [plans/06-ACTIONS-plan.md](plans/06-ACTIONS-plan.md). **Design notes:** actions are
+strictly propose → **confirm** → execute (a chat message can only propose; dispatch is a
+separate user-confirmed call, HMAC-signed, audit-logged, `simulated` when no webhook is
+configured — demo-able offline). MCP is hand-rolled Streamable-HTTP JSON-RPC on the stdlib
+(the `mcp` SDK isn't in the image; the subset we speak is small and keeps tests hermetic).
+
+- [x] Action-tool framework (`app/actions/`): deterministic command detection + param
+      extraction, per-tenant n8n webhook config **encrypted at rest**, dispatch + audit
+      log (`action_configs`/`action_log`), ActionCard UI (editable params, Confirm),
+      config UI in Sources → Actions & automations.
+  - [x] `create_lead` / CRM write.
+  - [x] `escalate` (hand off to human) — ALSO auto-suggested on every insufficient
+        answer ("escalates when unsure"); the tri-state label is untouched.
+  - [x] Vertical action (`create_invoice` → QuickBooks et al. via n8n).
+- [x] MCP **server**: `POST /mcp` (Streamable HTTP) exposing `search_documents`,
+      `sql_query` (NL→SQL, sqlglot-validated read-only), `list_sources` — tenant-scoped;
+      endpoint + tool list advertised in the UI (`/mcp/info`).
+- [x] MCP **client**: minimal Streamable-HTTP client + per-tenant registry
+      (`mcp_servers`, auth header encrypted) + `/mcp/servers*` endpoints; registered
+      servers' tools join the LangGraph agent as observation-only tools (never cited
+      as evidence). Verified end-to-end by self-consuming our own `/mcp`.
+- [x] Sandboxed code execution (`app/code_exec.py`): gated to grounded SQL answers with
+      an explicit statistical ask; deterministic codegen, AST validation, `python -I -S`
+      subprocess with rlimits + wall-clock kill; code+output in the inspector Trace tab,
+      answer gains a labeled "Computed from the cited rows" block.
+- [ ] Google Drive connector — deferred, demand-driven (per the roadmap's own note).
+- [ ] WhatsApp live validation (Meta Cloud webhook + 24h window) — deferred: the channel
+      code exists; validating live needs a client's Meta credentials + business number.
 
 ## Cross-cutting (do continuously)
 

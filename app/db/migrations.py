@@ -106,6 +106,42 @@ CREATE TABLE IF NOT EXISTS integration_tokens (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, provider)
 );
+
+-- Phase 6: action-tool framework (n8n write layer). Per-tenant webhook config for each
+-- built-in action; webhook_url + secret are encrypted at rest (app/crypto.py) — an n8n
+-- webhook URL is a capability URL, so the column never holds it in plaintext.
+CREATE TABLE IF NOT EXISTS action_configs (
+    user_id TEXT NOT NULL,
+    action TEXT NOT NULL,                 -- 'create_lead' | 'escalate' | 'create_invoice'
+    webhook_url TEXT NOT NULL DEFAULT '',
+    secret TEXT NOT NULL DEFAULT '',      -- HMAC signing key for X-ABA-Signature
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, action)
+);
+
+-- Audit trail of every confirmed action execution (also 'simulated' runs with no webhook).
+CREATE TABLE IF NOT EXISTS action_log (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    session_id TEXT,
+    action TEXT NOT NULL,
+    params TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL,                 -- 'executed' | 'simulated' | 'error'
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Phase 6: external MCP servers a tenant consumes as tools (MCP client side).
+-- auth_header holds an optional full header value ("Bearer …"), encrypted at rest.
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    auth_header TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

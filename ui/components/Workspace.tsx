@@ -2,6 +2,7 @@
 import React from "react";
 import type { Inventory } from "@/lib/types";
 import { Button, Card, Icons, Pill, cn } from "./ui";
+import AutomationPanel from "./AutomationPanel";
 
 const LANG_LABEL: Record<string, string> = { de: "German", en: "English" };
 
@@ -242,6 +243,9 @@ export default function Workspace({
           </div>
         )}
       </Card>
+
+      {/* Phase 6 — n8n action webhooks + MCP (server address, external servers) */}
+      <AutomationPanel />
     </div>
   );
 }

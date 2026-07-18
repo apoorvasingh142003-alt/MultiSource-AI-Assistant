@@ -16,7 +16,8 @@ from app.generation.verify import verify_citations
 from app.models import (AskResponse, Evidence, GenerationStep, LLMCall, RouteDecision,
                         StageTiming, Trace)
 from app.pricing import summarize
-from app.retrieval.intent import content_terms, is_advice_question, is_document_lookup
+from app.retrieval.intent import (content_terms, detect_reasoning_mode,
+                                  is_document_lookup)
 from app.roles import get_role
 from app.routing.classify import classify
 from app.sources.base import router_capability_brief
@@ -64,6 +65,22 @@ class Orchestrator:
         role_obj = get_role(role)
         trace.role_instructions = role_obj.system_instruction if role_obj.name != "default" else None
         trace.output_mode = output_mode
+
+        # REASONING MODE (Phase 5): deterministic, detected once from the question.
+        # "advice"/"design" → two-part grounded-facts + labelled-guidance treatment
+        # (lands on the reasoned side of the wall); "analysis" → document-intelligence
+        # directive over the evidence (stays grounded); "" → plain factual Q&A.
+        reasoning_mode = detect_reasoning_mode(question)
+        trace.reasoning_mode = reasoning_mode or None
+        if reasoning_mode:
+            trace.notes.append({
+                "advice": "Reasoning mode: advice — grounded subject facts (cited) + "
+                          "clearly-labelled general guidance.",
+                "design": "Reasoning mode: design — grounded facts (cited) + a "
+                          "clearly-labelled structured strategy deliverable.",
+                "analysis": "Reasoning mode: analysis — structured document intelligence "
+                            "strictly over the retrieved evidence (grounded).",
+            }[reasoning_mode])
 
         # 1) ROUTE (agent_role can bias source preference — Section 2.1)
         ts = time.perf_counter()
@@ -173,15 +190,46 @@ class Orchestrator:
         if (not safety_net_fired and dr and dr.intent == "keyword" and dr.search_terms
                 and is_document_lookup(question)):
             kw_terms = dr.search_terms
+        advice_mode = reasoning_mode in ("advice", "design")
+        # ADVICE/DESIGN with retrieved evidence must not ground guidance in off-topic
+        # text: apply the same deterministic relevance gate the safety net uses. Gated-out
+        # evidence is dropped entirely, so the flow falls through to the no-evidence advice
+        # branch below (honest "the record does not mention it" Part 1).
+        if advice_mode and evidence and not _on_topic(question, evidence):
+            trace.notes.append(
+                "Advice/design question — the retrieved passages share no content term "
+                "with the question; declining to ground guidance in off-topic text."
+            )
+            evidence = []
+            trace.evidence = []
         # Stream the grounded answer token-by-token when a sink is provided AND this is a
         # real LLM generation (not the deterministic keyword-identification answer).
-        stream_gen = on_token is not None and evidence and not kw_terms
-        if stream_gen:
+        stream_gen = on_token is not None and bool(evidence) and not kw_terms
+        if advice_mode and evidence:
+            # Two-part treatment over the retrieved, on-topic evidence: PART 1 cited
+            # facts (verified below like any grounded answer), PART 2 labelled guidance /
+            # structured design deliverable. The disclaimer marker lands the answer on the
+            # reasoned side of the wall (compute_answer_state) — never a blend.
+            stream_gen = on_token is not None
+            answer, cited, insufficient, gen_call = generate_grounded_advice(
+                question, evidence, role=role, output_mode=output_mode,
+                custom_system_prompt=custom_system_prompt, agent_role=agent_role,
+                output_format=output_format, temperature=temperature,
+                conversation_history=conversation_history,
+                mode=reasoning_mode, on_token=on_token,
+            )
+            trace.notes.append(
+                f"{reasoning_mode.capitalize()} question — grounded {len(evidence)} "
+                "passage(s) (cited, verified); the guidance/deliverable part is clearly "
+                "labelled as not from your sources."
+            )
+        elif stream_gen:
             answer, cited, insufficient, gen_call = generate_answer_stream(
                 question, evidence, on_token=on_token, role=role, output_mode=output_mode,
                 custom_system_prompt=custom_system_prompt, agent_role=agent_role,
                 output_format=output_format, temperature=temperature,
                 conversation_history=conversation_history,
+                reasoning_mode=reasoning_mode or None,
             )
         else:
             answer, cited, insufficient, gen_call = generate_answer(
@@ -189,6 +237,7 @@ class Orchestrator:
                 custom_system_prompt=custom_system_prompt, agent_role=agent_role,
                 output_format=output_format, temperature=temperature,
                 conversation_history=conversation_history,
+                reasoning_mode=reasoning_mode or None,
             )
         if not evidence:
             # Nothing was retrieved — give an honest, specific account of what was
@@ -205,7 +254,7 @@ class Orchestrator:
             # bare-decline and never answer from parametric knowledge alone. Ground the
             # subject's relevant facts from the documents (cited) and add clearly-labelled,
             # disclaimed general guidance. PART 1 is citation-verified like any grounded answer.
-            advice = is_advice_question(question) and not docs_out_of_scope
+            advice = advice_mode and not docs_out_of_scope
             gk_parametric_ok = decision.route == "GENERAL_KNOWLEDGE" and (
                 docs_out_of_scope or doc_search_attempted
             )
@@ -223,15 +272,15 @@ class Orchestrator:
                     custom_system_prompt=custom_system_prompt, agent_role=agent_role,
                     output_format=output_format, temperature=temperature,
                     conversation_history=conversation_history,
+                    mode=reasoning_mode, on_token=on_token,
                 )
-                if on_token and answer:
-                    on_token(answer)
+                stream_gen = on_token is not None
                 trace.notes.append(
-                    f"Advice question — grounded {len(evidence)} subject-context passage(s); "
-                    "general guidance is clearly labelled as ungrounded."
+                    f"{reasoning_mode.capitalize()} question — grounded {len(evidence)} "
+                    "subject-context passage(s); guidance is clearly labelled as ungrounded."
                     if evidence else
-                    "Advice question — no grounded subject context; answered with clearly-"
-                    "labelled general guidance only."
+                    f"{reasoning_mode.capitalize()} question — no grounded subject context; "
+                    "answered with clearly-labelled general guidance only."
                 )
                 # fall through to the normal verify/finalize below
             elif gk_parametric_ok:
@@ -314,10 +363,16 @@ class Orchestrator:
             "grounded": True,
             "insufficient": insufficient,
         }
+        if reasoning_mode:
+            trace.generation["reasoning_mode"] = reasoning_mode
         trace.generation_steps.append(GenerationStep(
-            step="generation", decision="grounded", duration_ms=_ms(ts),
+            step="generation",
+            decision=(f"grounded_advice:{reasoning_mode}" if (advice_mode and not insufficient)
+                      else "grounded"),
+            duration_ms=_ms(ts),
             details={"evidence_items": len(evidence),
-                     "model": gen_call.model if gen_call else "deterministic"},
+                     "model": gen_call.model if gen_call else "deterministic",
+                     **({"reasoning_mode": reasoning_mode} if reasoning_mode else {})},
         ))
 
         ts_v = time.perf_counter()

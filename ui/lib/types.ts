@@ -224,6 +224,9 @@ export interface Trace {
   role?: string | null;
   role_instructions?: string | null;
   output_mode: string;
+  /** Phase 5 — "advice" | "design" (two-part reasoned treatment) | "analysis" (grounded
+   *  document intelligence) | null (plain factual Q&A). */
+  reasoning_mode?: string | null;
   route?: RouteDecision | null;
   notes: string[];
   document_retrieval?: DocumentRetrievalTrace | null;
@@ -239,6 +242,84 @@ export interface Trace {
   multi_agent_trace?: MultiAgentTrace | null;
   agent_trace?: AgentTrace | null;
   research_trace?: ResearchTrace | null;
+  /** Phase 6 — proposed action-tool invocations recorded on this turn (dict form). */
+  actions?: Record<string, unknown>[];
+  /** Phase 6 — sandboxed computation over the cited SQL rows (code + output). */
+  code_execution?: CodeExecution | null;
+}
+
+/* ---------------- actions & code exec (Phase 6) ---------------- */
+// Mirrors app/models.py::ProposedAction. A proposal only — the UI's ActionCard is an
+// explicit external-write surface (editable params + Confirm); nothing dispatches until
+// the user confirms via POST /actions/execute. Proposals carry no knowledge claims and
+// never alter an answer's tri-state label.
+export interface ProposedAction {
+  id: string;
+  action: string;
+  title: string;
+  description: string;
+  params: Record<string, string>;
+  required: string[];
+  missing: string[];
+  origin: "command" | "suggested";
+  configured: boolean;
+  enabled: boolean;
+}
+
+export interface ActionResult {
+  id: string;
+  action: string;
+  status: "executed" | "simulated" | "error";
+  detail: string;
+  params: Record<string, string>;
+  created_at: string;
+}
+
+export interface ActionConfig {
+  action: string;
+  title: string;
+  description: string;
+  params: string[];
+  required: string[];
+  configured: boolean;
+  has_secret: boolean;
+  enabled: boolean;
+}
+
+export interface ActionLogEntry {
+  id: string;
+  session_id?: string | null;
+  action: string;
+  params: Record<string, string>;
+  status: "executed" | "simulated" | "error";
+  detail: string;
+  created_at: string;
+}
+
+export interface CodeExecution {
+  ok: boolean;
+  code: string;
+  output: string;
+  error: string;
+  duration_ms: number;
+  source_rows?: number;
+  source_sql?: string;
+}
+
+/* ---------------- MCP (Phase 6) ---------------- */
+export interface McpInfo {
+  url: string;
+  transport: string;
+  protocol_version: string;
+  tools: { name: string; description: string }[];
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  has_auth: boolean;
+  created_at?: string;
 }
 
 /* ---------------- generative components (Phase 3) ---------------- */
@@ -286,6 +367,11 @@ export interface AskResponse {
   answer_state?: AnswerState;
   citations: Evidence[];
   components?: AnswerComponent[];
+  /** Phase 6 — proposed actions (command or suggested escalation); confirm-to-execute. */
+  actions?: ProposedAction[];
+  /** Phase 6 — true for a pure action-command turn (procedural ack, no knowledge claims;
+   *  the tri-state chip is suppressed — the ActionCard is its own labeled surface). */
+  action_only?: boolean;
   trace: Trace;
   verification_warning?: string | null;
   hallucination_risk_score?: number | null;

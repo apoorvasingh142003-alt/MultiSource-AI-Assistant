@@ -78,7 +78,8 @@ def run_agent(orch, question: str,
               output_format: Optional[str] = "auto",
               temperature: Optional[float] = None,
               conversation_history: Optional[list[dict]] = None,
-              on_token=None, on_event=None) -> AskResponse:
+              on_token=None, on_event=None,
+              user_id: Optional[str] = None) -> AskResponse:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
     from app.agent.graph import build_agent_graph
@@ -87,6 +88,16 @@ def run_agent(orch, question: str,
     s = get_settings()
     t0 = time.perf_counter()
     ctx = AgentRunContext(orch, allowed_docs, allowed_tables)
+
+    # External MCP tools (Phase 6): any MCP servers this tenant registered join the tool
+    # set as observation-only tools. Fully guarded — no registration, no change.
+    extra_tools: list = []
+    if user_id:
+        try:
+            from app.mcp.agent_tools import make_mcp_tools
+            extra_tools = make_mcp_tools(ctx, user_id)
+        except Exception:
+            log.exception("could not load external MCP tools")
 
     system_prompt = _get_system_prompt(
         role, output_mode, custom_system_prompt=custom_system_prompt,
@@ -97,7 +108,8 @@ def run_agent(orch, question: str,
                 + _history_messages(conversation_history)
                 + [HumanMessage(content=question)])
 
-    graph = build_agent_graph(ctx, s.model_generation, s, temperature, question=question)
+    graph = build_agent_graph(ctx, s.model_generation, s, temperature, question=question,
+                              extra_tools=extra_tools)
 
     agent_calls: list[LLMCall] = []
     final_answer = ""

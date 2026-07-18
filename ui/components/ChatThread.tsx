@@ -8,6 +8,7 @@ import { segmentAnswer, stripMarkdownTables } from "@/lib/tableParser";
 import AnswerTable from "./AnswerTable";
 import AnswerStateChip from "./AnswerStateChip";
 import GenerativeComponents from "./GenerativeComponents";
+import ActionCard from "./ActionCard";
 import type { InspectorTab } from "./InspectorPanel";
 
 export interface ChatTurn {
@@ -29,6 +30,7 @@ export interface ChatTurn {
 
 export default function ChatThread({
   turns, onEditQuestion, onDeleteTurn, onRegenerate, onInspect, onCite, activeInspectId, busy,
+  sessionId,
 }: {
   turns: ChatTurn[];
   onEditQuestion: (turn: ChatTurn, newText: string) => void;
@@ -38,6 +40,7 @@ export default function ChatThread({
   onCite: (turn: ChatTurn, id: string) => void;
   activeInspectId: string | null;
   busy: boolean;
+  sessionId?: string | null;
 }) {
   const endRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -59,6 +62,7 @@ export default function ChatThread({
             onCite={onCite}
             active={activeInspectId === turn.id}
             busy={busy}
+            sessionId={sessionId}
           />
         )
       )}
@@ -83,7 +87,7 @@ function SystemNote({ turn }: { turn: ChatTurn }) {
 }
 
 function Turn({
-  turn, onEditQuestion, onDeleteTurn, onRegenerate, onInspect, onCite, active, busy,
+  turn, onEditQuestion, onDeleteTurn, onRegenerate, onInspect, onCite, active, busy, sessionId,
 }: {
   turn: ChatTurn;
   onEditQuestion: (turn: ChatTurn, newText: string) => void;
@@ -93,6 +97,7 @@ function Turn({
   onCite: (turn: ChatTurn, id: string) => void;
   active: boolean;
   busy: boolean;
+  sessionId?: string | null;
 }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(turn.question);
@@ -156,6 +161,7 @@ function Turn({
             <AssistantAnswer
               turn={turn} resp={turn.resp} active={active} busy={busy} copied={copied}
               onCopy={copy} onInspect={onInspect} onCite={onCite} onRegenerate={onRegenerate}
+              sessionId={sessionId}
             />
           ) : turn.error ? (
             <div className="flex items-start gap-2 rounded-2xl bg-amber-50 px-4 py-3 text-[13px] text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
@@ -184,13 +190,14 @@ function Turn({
 }
 
 function AssistantAnswer({
-  turn, resp, active, busy, copied, onCopy, onInspect, onCite, onRegenerate,
+  turn, resp, active, busy, copied, onCopy, onInspect, onCite, onRegenerate, sessionId,
 }: {
   turn: ChatTurn; resp: AskResponse; active: boolean; busy: boolean; copied: boolean;
   onCopy: (t: string) => void;
   onInspect: (turn: ChatTurn, tab: InspectorTab) => void;
   onCite: (turn: ChatTurn, id: string) => void;
   onRegenerate: (turn: ChatTurn) => void;
+  sessionId?: string | null;
 }) {
   const rtl = /[֐-׿]/.test(resp.answer);
   const components = resp.components ?? [];
@@ -207,15 +214,19 @@ function AssistantAnswer({
       "space-y-3 rounded-2xl px-1 py-0.5 transition",
       active && "ring-2 ring-accent/20",
     )}>
-      {/* tri-state chip + verification warning */}
-      <div className="flex flex-wrap items-center gap-2">
-        <AnswerStateChip resp={resp} />
-        {resp.trace.route && (
-          <button onClick={() => onInspect(turn, "trace")} title="Open the retrieval trace">
-            <RouteBadge route={resp.trace.route.route} small withLabel />
-          </button>
-        )}
-      </div>
+      {/* tri-state chip + verification warning. A pure action-command turn is procedural
+          (no knowledge claims), so the grounding chip is suppressed — the ActionCard below
+          is its own clearly-labeled external-write surface, never part of the wall. */}
+      {!resp.action_only && (
+        <div className="flex flex-wrap items-center gap-2">
+          <AnswerStateChip resp={resp} />
+          {resp.trace.route && (
+            <button onClick={() => onInspect(turn, "trace")} title="Open the retrieval trace">
+              <RouteBadge route={resp.trace.route.route} small withLabel />
+            </button>
+          )}
+        </div>
+      )}
 
       {resp.verification_warning && (
         <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30">
@@ -243,6 +254,16 @@ function AssistantAnswer({
           components={components} citations={resp.citations}
           onCite={(id) => onCite(turn, id)} onInspect={() => onInspect(turn, "answer")}
         />
+      )}
+
+      {/* actions (Phase 6) — a command's proposal, or a suggested escalation under an
+          insufficient answer. Confirm-to-execute; distinct external-write identity. */}
+      {(resp.actions ?? []).length > 0 && (
+        <div className="space-y-2">
+          {(resp.actions ?? []).map((a) => (
+            <ActionCard key={a.id} proposal={a} sessionId={sessionId} />
+          ))}
+        </div>
       )}
 
       {/* source chips */}

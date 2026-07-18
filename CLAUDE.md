@@ -138,6 +138,45 @@ concurrently, then synthesizes — exposing a `multi_agent_trace`.
   LangGraph graph also gained a **sufficiency node** (`graph.py`) that steers the agent
   back for one bounded extra round when its evidence looks insufficient.
 
+- **Reasoning / design mode (Phase 5)** (`app/retrieval/intent.py::detect_reasoning_mode`):
+  one deterministic detector classifies each question as `advice` | `design` | `analysis`
+  | plain. **advice/design** → the two-part treatment (`generate_grounded_advice`): PART 1
+  cites the retrieved on-topic evidence (gated by `_on_topic`, verified like any grounded
+  answer), PART 2 starts with the exact `ADVICE_GUIDANCE_DISCLAIMER` sentence — free-form
+  guidance for advice, a structured strategy deliverable for design — which lands the
+  answer on the **reasoned** side of the wall via `compute_answer_state`'s marker. This
+  path now fires *with or without* retrieved evidence (before Phase 5, only when retrieval
+  found nothing). **analysis** (clause/risk analysis) appends a DOCUMENT INTELLIGENCE
+  directive to grounded generation and stays **grounded**. Deep research honours the same
+  modes for its final answer; `Trace.reasoning_mode` renders as an amber pill in the
+  inspector. Grouped citation markers ("[e1, e2]") are normalized to "[e1][e2]" at the
+  generation chokepoint so verification/clickable citations never miss ids.
+
+- **Actions & integrations (Phase 6)** — from "answers" to "does things", wall-safe:
+  - **Actions / n8n write layer** (`app/actions/`): three tool contracts (`create_lead`,
+    `escalate`, `create_invoice`) whose implementation POSTs to a per-tenant n8n webhook
+    (URL + HMAC secret encrypted at rest in `action_configs`; every run audit-logged in
+    `action_log`). Strictly **propose → confirm → execute**: a deterministic detector
+    (`app/actions/detect.py`) turns an explicit command ("create a lead for Jane …") into
+    an `AskResponse.actions` proposal (`Engine.ask` short-circuits retrieval;
+    `action_only=True`, the UI suppresses the tri-state chip — a procedural ack makes no
+    knowledge claims); dispatch happens only via `POST /actions/execute`. No webhook
+    configured → `simulated` (offline demo works). **Escalate-when-unsure:** `_finalize`
+    attaches a *suggested* escalate proposal to every `insufficient` answer — the honest
+    decline keeps its label; the handoff is one confirm away. UI: `ActionCard.tsx`
+    (violet "external action" identity, editable params), config in Sources →
+    `AutomationPanel.tsx`.
+  - **MCP** (`app/mcp/`): hand-rolled Streamable-HTTP JSON-RPC (stdlib, no `mcp` dep).
+    Server at `POST /mcp` — tenant-scoped read tools `search_documents`, `sql_query`
+    (same sqlglot read-only chokepoint), `list_sources`; address advertised via
+    `/mcp/info`. Client (`client.py` + `registry.py`, auth header encrypted): registered
+    external servers' tools join the LangGraph agent as observation-only tools — never
+    minted as citable evidence.
+  - **Sandboxed code exec** (`app/code_exec.py`): gated to grounded answers with SQL rows
+    AND a statistical cue (median/average/stdev/growth…); deterministic codegen → AST
+    validation → `python -I -S` subprocess with rlimits; `Trace.code_execution` renders
+    in the inspector, the answer gains a labeled "Computed from the cited rows" block.
+
 ### Engine, tenancy, and state
 - `app/engine.py`: `Engine` wires sources + orchestrator. **One Engine per tenant** —
   `get_engine(user_id)` is an LRU cache of per-user engines. Startup ingests only the

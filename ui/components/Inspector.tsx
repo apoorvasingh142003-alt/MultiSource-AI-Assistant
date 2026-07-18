@@ -29,6 +29,14 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
       <Card className="flex flex-wrap items-center gap-2 px-4 py-3">
         <Pill tone="indigo">Output: {t.output_mode || "Standard Response"}</Pill>
         {t.role && <Pill>Role: {t.role}</Pill>}
+        {t.reasoning_mode && (
+          <Pill tone="amber">
+            reasoning mode: {t.reasoning_mode}
+            {t.reasoning_mode === "analysis"
+              ? " — grounded document intelligence"
+              : " — grounded facts + labelled guidance"}
+          </Pill>
+        )}
       </Card>
 
       {t.route && (
@@ -73,6 +81,58 @@ export default function Inspector({ resp }: { resp: AskResponse | null }) {
       {t.sql_executions.length > 0 && (
         <Collapsible icon={<Icons.db />} title="SQL branch" right={<Pill tone="sky">{t.sql_executions.length} query</Pill>}>
           <div className="space-y-3">{t.sql_executions.map((s, i) => <SqlBlock key={i} s={s} />)}</div>
+        </Collapsible>
+      )}
+
+      {/* Phase 6 — proposed actions on this turn (confirm-to-execute; external writes) */}
+      {!!t.actions?.length && (
+        <Collapsible icon={<Icons.bolt />} title="Actions (n8n write layer)"
+          right={<Pill tone="indigo">{t.actions.length} proposed</Pill>}>
+          <p className="mb-2 text-[11.5px] text-faint">
+            Proposals only — nothing is dispatched until the user confirms the card in chat.
+            Confirmed executions are audit-logged server-side.
+          </p>
+          <div className="space-y-2">
+            {t.actions.map((a: any, i: number) => (
+              <div key={i} className="rounded-xl border border-line bg-surface-2/60 p-3 text-[12px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Pill tone="indigo"><Icons.bolt className="h-3 w-3" />{String(a.title ?? a.action)}</Pill>
+                  <Pill>{String(a.origin)}</Pill>
+                  <Pill tone={a.configured ? "emerald" : "slate"}>{a.configured ? "webhook live" : "simulated"}</Pill>
+                </div>
+                <div className="mt-1.5 font-mono text-[11px] text-muted">
+                  {Object.entries((a.params ?? {}) as Record<string, string>)
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => `${k}=${v}`).join(" · ") || "(no params extracted)"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Collapsible>
+      )}
+
+      {/* Phase 6 — sandboxed computation over the cited SQL rows */}
+      {t.code_execution && (
+        <Collapsible icon={<Icons.chart />} title="Sandboxed computation"
+          right={<Pill tone={t.code_execution.ok ? "emerald" : "rose"}>
+            {t.code_execution.ok ? "ok" : "failed"} · {t.code_execution.duration_ms} ms
+          </Pill>}>
+          <p className="mb-2 text-[11.5px] text-faint">
+            Deterministic Python over the {t.code_execution.source_rows ?? "retrieved"} cited
+            SQL row(s), run in an isolated subprocess (AST-validated, rlimit-capped). The
+            answer&apos;s “Computed from the cited rows” block comes from this output.
+          </p>
+          <pre className="scroll-thin overflow-x-auto rounded-xl bg-surface-2 p-3 font-mono text-[11px] leading-relaxed text-body ring-1 ring-inset ring-line">
+            {t.code_execution.code}
+          </pre>
+          {t.code_execution.output && (
+            <pre className="scroll-thin mt-2 overflow-x-auto rounded-xl bg-emerald-50 p-3 font-mono text-[11px] leading-relaxed text-emerald-800 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30">
+              {t.code_execution.output}
+            </pre>
+          )}
+          {t.code_execution.error && (
+            <p className="mt-2 text-[11.5px] text-rose-600 dark:text-rose-400">{t.code_execution.error}</p>
+          )}
         </Collapsible>
       )}
 
